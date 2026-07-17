@@ -350,3 +350,36 @@ Stage Summary:
 - Auto-migration runs on every /api/auth/init call (triggered by login page mount)
 - Docker build forces schema sync with --accept-data-loss
 - Pushed to both GitHub repos (qrtagssen + qrtagsbis)
+
+---
+Task ID: 10
+Agent: Main Agent
+Task: Fix "Identifiants incorrects" login error on deployed Docker/Coolify environment
+
+Work Log:
+- User reported "Identifiants incorrects" when trying to log in
+- Verified login API works locally (curl test: returns success with correct credentials)
+- Discovered the root cause: in Docker deployments, when `prisma db push` fails or the database is fresh/empty, the User table doesn't exist, causing all login attempts to fail
+- The previous `/api/auth/init` only added missing COLUMNS to existing tables, but couldn't handle missing TABLES
+- Rewrote `/api/auth/init/route.ts` to:
+  1. Create ALL 16 tables via raw SQL (CREATE TABLE IF NOT EXISTS) as a failsafe
+  2. Then run column migrations for existing tables with missing columns
+  3. Then ensure the admin user exists (using Prisma ORM → raw SQL fallback)
+- Added auto-initialization in login API (`/api/auth/login/route.ts`):
+  - When user is not found, automatically calls `/api/auth/init` to create tables and admin
+  - Then retries finding the user
+- Created `scripts/init-db.cjs` with dual-strategy:
+  1. Try `prisma db push` first (ideal case)
+  2. If that fails, create tables manually via raw SQL (failsafe)
+  3. Verify critical tables, then create admin user
+- Updated Dockerfile to use `init-db.cjs` instead of separate prisma + create-admin commands
+- Tested with completely FRESH database (no tables, no admin):
+  - Login auto-triggered init → created 16 tables → created admin → login succeeded!
+
+Files Modified:
+- src/app/api/auth/init/route.ts (complete rewrite with table creation SQL)
+- src/app/api/auth/login/route.ts (added auto-init on user not found)
+- scripts/init-db.cjs (NEW - robust DB initialization with dual strategy)
+- Dockerfile (updated CMD to use init-db.cjs)
+
+Pushed to: github.com/topmuch/qrtagssen (main), github.com/topmuch/qrtagsbis (main)
