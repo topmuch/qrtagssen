@@ -43,8 +43,9 @@ export async function generateSerialNumber(agencyType: AgencyType): Promise<stri
   while (attempts < maxAttempts) {
     serial = `TAG-${prefix}-${generateRandomCode(6)}`;
 
-    const existing = await db.baggage.findUnique({
-      where: { reference: serial }
+    // Use Tag model (not Baggage which no longer exists)
+    const existing = await db.tag.findUnique({
+      where: { serialNumber: serial }
     });
 
     if (!existing) {
@@ -76,11 +77,12 @@ export async function generateSerialNumbersBulk(agencyType: AgencyType, count: n
     }
 
     // Check which ones already exist in DB (single query for all)
-    const existing = await db.baggage.findMany({
-      where: { reference: { in: candidates } },
-      select: { reference: true },
+    // Use Tag model (not Baggage which no longer exists)
+    const existing = await db.tag.findMany({
+      where: { serialNumber: { in: candidates } },
+      select: { serialNumber: true },
     });
-    const existingSet = new Set(existing.map(b => b.reference));
+    const existingSet = new Set(existing.map(t => t.serialNumber));
 
     // Add non-existing candidates
     for (const candidate of candidates) {
@@ -126,16 +128,15 @@ export async function generateTags(options: GenerateTagOptions): Promise<string[
   // Use bulk serial number generation for efficiency
   const serialNumbers = await generateSerialNumbersBulk(agencyType, count);
 
-  // Batch create all tags at once
-  await db.baggage.createMany({
-    data: serialNumbers.map((reference, i) => ({
-      reference,
-      type: agencyType,
+  // Batch create all tags at once - use Tag model
+  await db.tag.createMany({
+    data: serialNumbers.map((serialNumber) => ({
+      serialNumber,
+      tagType: 'standard',
       setId,
       agencyId: agencyId || null,
-      baggageIndex: i + 1,
-      baggageType: 'tag',
       status: 'created',
+      customData: '{}',
     })),
   });
 

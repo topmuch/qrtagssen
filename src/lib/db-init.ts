@@ -501,6 +501,41 @@ const CREATE_TABLES_SQL = [
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`,
+  `CREATE TABLE IF NOT EXISTS "Baggage" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "reference" TEXT NOT NULL UNIQUE,
+    "type" TEXT NOT NULL DEFAULT 'standard',
+    "setId" TEXT,
+    "tagIndex" INTEGER NOT NULL DEFAULT 1,
+    "tagType" TEXT NOT NULL DEFAULT 'tag',
+    "status" TEXT NOT NULL DEFAULT 'created',
+    "agencyId" TEXT,
+    "ownerName" TEXT,
+    "whatsappOwner" TEXT,
+    "ownerPhone" TEXT,
+    "ownerEmail" TEXT,
+    "itemName" TEXT,
+    "itemDescription" TEXT,
+    "itemCategory" TEXT,
+    "locationBuilding" TEXT,
+    "locationRoom" TEXT,
+    "locationNote" TEXT,
+    "customData" TEXT NOT NULL DEFAULT '{}',
+    "activatedAt" DATETIME,
+    "expiresAt" DATETIME,
+    "lastScanDate" DATETIME,
+    "lastLocation" TEXT,
+    "declaredLostAt" DATETIME,
+    "foundAt" DATETIME,
+    "founderName" TEXT,
+    "founderPhone" TEXT,
+    "founderEmail" TEXT,
+    "founderMessage" TEXT,
+    "founderAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id") ON DELETE SET NULL
+  )`,
 ];
 
 // ═══════════════════════════════════════════════════
@@ -1092,6 +1127,9 @@ export async function initializeDatabase(): Promise<{
     // Step 3: Ensure admin user exists with correct password
     const adminResult = await ensureAdminUser();
 
+    // Step 4: Seed default agency types if none exist
+    await ensureAgencyTypes();
+
     console.log('[db-init] ═══ Initialization complete ═══');
     _initDone = true;
 
@@ -1099,6 +1137,52 @@ export async function initializeDatabase(): Promise<{
   })();
 
   return _initPromise;
+}
+
+/**
+ * Ensure default agency types exist in the database.
+ * These are required for creating agencies.
+ */
+async function ensureAgencyTypes(): Promise<void> {
+  const defaultTypes = [
+    { name: 'hotel', label: 'Hôtel', icon: 'Hotel', color: '#2563EB', description: 'Hôtels et hébergements' },
+    { name: 'bus', label: 'Compagnie de Bus', icon: 'Bus', color: '#7C3AED', description: 'Transport par bus' },
+    { name: 'school', label: 'École / Université', icon: 'GraduationCap', color: '#059669', description: 'Établissements scolaires' },
+    { name: 'clinic', label: 'Clinique / Hôpital', icon: 'Stethoscope', color: '#DC2626', description: 'Établissements de santé' },
+    { name: 'car_rental', label: 'Loueur de Voitures', icon: 'Car', color: '#D97706', description: 'Location de véhicules' },
+    { name: 'luggage_storage', label: 'Consigne de Bagages', icon: 'Luggage', color: '#0891B2', description: 'Consignes et stockage' },
+    { name: 'enterprise', label: 'Entreprise', icon: 'Building2', color: '#4F46E5', description: 'Entreprises et sociétés' },
+    { name: 'event', label: 'Événementiel', icon: 'PartyPopper', color: '#E11D48', description: 'Organisation d\'événements' },
+  ];
+
+  try {
+    // Check if any agency types exist
+    const count = await db.$queryRawUnsafe(
+      `SELECT COUNT(*) as count FROM AgencyType`
+    ) as Array<{ count: number }>;
+
+    if (count[0]?.count > 0) {
+      return; // Already seeded
+    }
+
+    // Seed default agency types using raw SQL
+    for (const t of defaultTypes) {
+      const id = `at_${t.name}_${Date.now()}`;
+      const now = new Date().toISOString();
+      try {
+        await db.$executeRawUnsafe(
+          `INSERT INTO AgencyType (id, name, label, icon, color, description, customFields, isActive, sortOrder, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, '[]', 1, 0, ?, ?)`,
+          id, t.name, t.label, t.icon, t.color, t.description, now, now
+        );
+      } catch (err) {
+        console.error(`[db-init] ✗ Failed to seed AgencyType ${t.name}:`, err instanceof Error ? err.message : err);
+      }
+    }
+    console.log(`[db-init] ✓ Seeded ${defaultTypes.length} default agency types`);
+  } catch (err) {
+    console.error('[db-init] AgencyType seed check failed:', err instanceof Error ? err.message : err);
+  }
 }
 
 /**

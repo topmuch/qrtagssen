@@ -3,13 +3,16 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import { sendEmail, getEmailSettings, getNewAgencyEmailTemplate } from '@/lib/email';
 
-// Validation schema
+// Validation schema - includes agencyTypeId (required by Prisma)
 const agencySchema = z.object({
-  name: z.string().min(1, 'Name is required'),
-  slug: z.string().min(1, 'Slug is required'),
+  name: z.string().min(1, 'Le nom est requis'),
+  slug: z.string().min(1, 'Le slug est requis'),
+  agencyTypeId: z.string().min(1, "Le type d'agence est requis"),
   email: z.string().email().optional().or(z.literal('')),
   phone: z.string().optional(),
   address: z.string().optional(),
+  city: z.string().optional(),
+  country: z.string().optional(),
 });
 
 // GET - List all agencies
@@ -17,8 +20,11 @@ export async function GET() {
   try {
     const agencies = await db.agency.findMany({
       include: {
+        agencyType: {
+          select: { id: true, name: true, label: true, icon: true, color: true }
+        },
         _count: {
-          select: { baggages: true, users: true }
+          select: { tags: true, users: true }
         }
       },
       orderBy: { createdAt: 'desc' }
@@ -29,7 +35,7 @@ export async function GET() {
   } catch (error) {
     console.error('Get agencies error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -48,7 +54,19 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json(
-        { error: 'Slug already exists' },
+        { error: 'Ce slug est déjà utilisé' },
+        { status: 400 }
+      );
+    }
+
+    // Verify the agency type exists
+    const agencyType = await db.agencyType.findUnique({
+      where: { id: validatedData.agencyTypeId }
+    });
+
+    if (!agencyType) {
+      return NextResponse.json(
+        { error: "Type d'agence non trouvé. Veuillez d'abord créer un type d'agence." },
         { status: 400 }
       );
     }
@@ -57,9 +75,12 @@ export async function POST(request: NextRequest) {
       data: {
         name: validatedData.name,
         slug: validatedData.slug,
+        agencyTypeId: validatedData.agencyTypeId,
         email: validatedData.email || null,
         phone: validatedData.phone || null,
         address: validatedData.address || null,
+        city: validatedData.city || null,
+        country: validatedData.country || null,
       }
     });
 
@@ -91,13 +112,17 @@ export async function POST(request: NextRequest) {
     }
 
     // 🔔 Create in-app notification for SuperAdmin
-    await db.notification.create({
-      data: {
-        type: 'new_agency',
-        message: `🏢 Nouvelle agence créée : ${agency.name}${agency.email ? ` (${agency.email})` : ''}`,
-        read: false,
-      }
-    });
+    try {
+      await db.notification.create({
+        data: {
+          type: 'new_agency',
+          message: `🏢 Nouvelle agence créée : ${agency.name}${agency.email ? ` (${agency.email})` : ''}`,
+          read: false,
+        }
+      });
+    } catch (notifError) {
+      console.error('Failed to create notification:', notifError);
+    }
 
     return NextResponse.json({ agency });
 
@@ -112,7 +137,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -126,7 +151,7 @@ export async function PUT(request: NextRequest) {
 
     if (!id) {
       return NextResponse.json(
-        { error: 'Agency ID is required' },
+        { error: "L'ID de l'agence est requis" },
         { status: 400 }
       );
     }
@@ -139,6 +164,9 @@ export async function PUT(request: NextRequest) {
     if (data.email !== undefined) updateData.email = data.email || null;
     if (data.phone !== undefined) updateData.phone = data.phone || null;
     if (data.address !== undefined) updateData.address = data.address || null;
+    if (data.city !== undefined) updateData.city = data.city || null;
+    if (data.country !== undefined) updateData.country = data.country || null;
+    if (data.agencyTypeId !== undefined) updateData.agencyTypeId = data.agencyTypeId;
     if (active !== undefined) updateData.active = active;
 
     // Check slug uniqueness if slug is being updated
@@ -164,7 +192,7 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error('Update agency error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -178,7 +206,7 @@ export async function DELETE(request: NextRequest) {
 
     if (!id) {
       return NextResponse.json(
-        { error: 'Agency ID is required' },
+        { error: "L'ID de l'agence est requis" },
         { status: 400 }
       );
     }
@@ -192,7 +220,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     console.error('Delete agency error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }

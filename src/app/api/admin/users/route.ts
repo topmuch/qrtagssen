@@ -10,6 +10,8 @@ const userSchema = z.object({
   password: z.string().min(6),
   role: z.enum(['superadmin', 'admin', 'agent', 'agency']),
   agencyId: z.string().optional(),
+  staffRole: z.string().optional(),
+  permissions: z.array(z.string()).optional(),
 });
 
 // Password hashing with bcrypt (compatible with login API)
@@ -33,7 +35,7 @@ export async function GET() {
   } catch (error) {
     console.error('Get users error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -52,7 +54,7 @@ export async function POST(request: NextRequest) {
 
     if (existing) {
       return NextResponse.json(
-        { error: 'Email already exists' },
+        { error: 'Cet email est déjà utilisé' },
         { status: 400 }
       );
     }
@@ -65,6 +67,9 @@ export async function POST(request: NextRequest) {
         password: hashedPassword,
         role: validatedData.role,
         agencyId: validatedData.agencyId || null,
+        staffRole: validatedData.staffRole || null,
+        permissions: JSON.stringify(validatedData.permissions || []),
+        isActive: true,
       }
     });
 
@@ -84,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -102,6 +107,11 @@ export async function PUT(request: NextRequest) {
       updateData.password = await hashPassword(password);
     }
 
+    // Handle permissions as JSON string if provided as array
+    if (data.permissions && Array.isArray(data.permissions)) {
+      updateData.permissions = JSON.stringify(data.permissions);
+    }
+
     const user = await db.user.update({
       where: { id },
       data: updateData
@@ -114,7 +124,7 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     console.error('Update user error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }
@@ -142,7 +152,7 @@ export async function DELETE(request: NextRequest) {
   } catch (error) {
     console.error('Delete user error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     );
   }

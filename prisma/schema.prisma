@@ -112,6 +112,7 @@ model Agency {
   // Relations
   users             User[]
   tags              Tag[]
+  baggages          Baggage[]
   invoices          Invoice[]
   subscription      Subscription?
   wallet            Wallet?
@@ -707,4 +708,52 @@ model SMSCredits {
   totalPurchased  Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// ═══════════════════════════════════════════
+// LEGACY BAGGAGE MODEL
+// Kept for backward compatibility with existing API routes.
+// New code should use the Tag model instead.
+// ═══════════════════════════════════════════
+
+model Baggage {
+  id                String    @id @default(cuid())
+  reference         String    @unique
+  type              String    @default("standard")
+  setId             String?
+  tagIndex          Int       @default(1)
+  tagType           String    @default("tag")
+  status            String    @default("created")
+  agencyId          String?
+  agency            Agency?   @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  ownerName         String?
+  whatsappOwner     String?
+  ownerPhone        String?
+  ownerEmail        String?
+  itemName          String?
+  itemDescription   String?
+  itemCategory      String?
+  locationBuilding  String?
+  locationRoom      String?
+  locationNote      String?
+  customData        String    @default("{}")
+  activatedAt       DateTime?
+  expiresAt         DateTime?
+  lastScanDate      DateTime?
+  lastLocation      String?
+  declaredLostAt    DateTime?
+  foundAt           DateTime?
+  founderName       String?
+  founderPhone      String?
+  founderEmail      String?
+  founderMessage    String?
+  founderAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([reference])
+  @@index([agencyId])
+  @@index([setId])
+  @@index([status])
+  @@index([createdAt])
 }
