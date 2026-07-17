@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 import { logLoginAttempt } from '@/lib/session';
+import { initializeDatabase } from '@/lib/db-init';
 import { cookies } from 'next/headers';
 
 /**
@@ -22,7 +23,7 @@ async function safeLogLoginAttempt(params: {
 
 /**
  * Find user by email - tries Prisma first, falls back to raw SQL
- * if Prisma fails due to missing columns
+ * if Prisma fails due to missing columns/tables
  */
 async function findUser(email: string): Promise<{
   id: string;
@@ -87,7 +88,7 @@ async function findUser(email: string): Promise<{
         role: u.role,
         agencyId: u.agencyId,
         isActive: !!u.isActive,
-        agency: null, // Skip agency join in fallback mode
+        agency: null,
       };
     } catch (rawError) {
       console.error('[login] Raw SQL also failed:', rawError instanceof Error ? rawError.message : rawError);
@@ -116,23 +117,24 @@ export async function POST(request: NextRequest) {
 
     console.log(`[login] Attempt: email=${email.toLowerCase()}, role=${role}`);
 
-    // Rechercher l'utilisateur (with fallback for missing columns)
+    // Rechercher l'utilisateur (with fallback for missing columns/tables)
     let user = await findUser(email);
 
-    // ── Auto-initialize if user not found ──
-    // If the admin user doesn't exist, trigger DB initialization
+    // ── Auto-initialize database if user not found ──
+    // This handles the case where Docker deployment has an empty/stale DB.
+    // We call initializeDatabase() DIRECTLY (no self-fetch) to:
+    // 1. Create all required tables
+    // 2. Create or reset the admin user
     if (!user) {
-      console.log(`[login] User not found, triggering auto-init...`);
+      console.log(`[login] User not found, initializing database...`);
       try {
-        // Ensure tables and admin user exist
-        const initResponse = await fetch(`${request.nextUrl.origin}/api/auth/init`, { method: 'POST' });
-        const initData = await initResponse.json();
-        console.log(`[login] Auto-init result:`, JSON.stringify(initData).substring(0, 200));
+        const initResult = await initializeDatabase();
+        console.log(`[login] DB init result: tables=${initResult.tables.created.length}, admin created=${initResult.admin.created}, admin reset=${initResult.admin.reset}`);
 
         // Try finding user again after init
         user = await findUser(email);
       } catch (initErr) {
-        console.error(`[login] Auto-init failed:`, initErr);
+        console.error(`[login] DB init failed:`, initErr);
       }
     }
 
