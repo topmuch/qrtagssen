@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Vérifier le rôle
-    if (role === 'admin' && user.role !== 'superadmin') {
+    if ((role === 'admin' || role === 'superadmin') && user.role !== 'superadmin') {
       await logLoginAttempt({
         userId: user.id,
         email,

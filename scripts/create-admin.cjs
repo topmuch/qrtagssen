@@ -5,6 +5,11 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
+// Force DATABASE_URL for Docker environment
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = 'file:/app/data/qrtags.db';
+}
+
 const prisma = new PrismaClient();
 
 async function main() {
@@ -13,13 +18,16 @@ async function main() {
   const adminName = process.env.ADMIN_NAME || 'Super Admin QRTags';
 
   try {
+    console.log(`[create-admin] Checking admin user: ${adminEmail}`);
+    console.log(`[create-admin] DATABASE_URL: ${process.env.DATABASE_URL}`);
+
     // Check if admin already exists
     const existingAdmin = await prisma.user.findUnique({
       where: { email: adminEmail }
     });
 
     if (existingAdmin) {
-      console.log(`✅ Admin user already exists: ${adminEmail}`);
+      console.log(`[create-admin] ✅ Admin user already exists: ${adminEmail} (role: ${existingAdmin.role})`);
       return;
     }
 
@@ -58,12 +66,12 @@ async function main() {
       }
     });
 
-    console.log(`✅ SuperAdmin created successfully!`);
-    console.log(`   Email: ${adminEmail}`);
-    console.log(`   Password: ${adminPassword}`);
-    console.log(`   ⚠️  Change the password after first login!`);
+    console.log(`[create-admin] ✅ SuperAdmin created successfully!`);
+    console.log(`[create-admin]    Email: ${adminEmail}`);
+    console.log(`[create-admin]    Password: ${adminPassword}`);
+    console.log(`[create-admin]    ⚠️  Change the password after first login!`);
   } catch (error) {
-    console.error('❌ Error creating admin user:', error.message);
+    console.error('[create-admin] ❌ Error:', error.message);
     // Don't exit with error code to not block the container startup
   } finally {
     await prisma.$disconnect();
