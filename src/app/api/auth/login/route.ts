@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
 import { logLoginAttempt } from '@/lib/session';
-import { initializeDatabase } from '@/lib/db-init';
+import { initializeDatabase, ensureAdminUser } from '@/lib/db-init';
 import { cookies } from 'next/headers';
 
 /**
@@ -117,24 +117,29 @@ export async function POST(request: NextRequest) {
 
     console.log(`[login] Attempt: email=${email.toLowerCase()}, role=${role}`);
 
+    // ── Step 1: Ensure database tables exist (runs once per process) ──
+    try {
+      await initializeDatabase();
+    } catch {
+      // Non-fatal - tables might already exist
+    }
+
     // Rechercher l'utilisateur (with fallback for missing columns/tables)
     let user = await findUser(email);
 
-    // ── Auto-initialize database if user not found ──
-    // This handles the case where Docker deployment has an empty/stale DB.
-    // We call initializeDatabase() DIRECTLY (no self-fetch) to:
-    // 1. Create all required tables
-    // 2. Create or reset the admin user
+    // ── Step 2: Auto-initialize admin if user not found ──
     if (!user) {
-      console.log(`[login] User not found, initializing database...`);
+      console.log(`[login] User not found, forcing admin check...`);
       try {
-        const initResult = await initializeDatabase();
-        console.log(`[login] DB init result: tables=${initResult.tables.created.length}, admin created=${initResult.admin.created}, admin reset=${initResult.admin.reset}`);
+        // Call ensureAdminUser DIRECTLY (bypasses _initDone flag)
+        // This guarantees the admin user is created if it should exist
+        const adminResult = await ensureAdminUser();
+        console.log(`[login] Admin check result: created=${adminResult.created}, reset=${adminResult.reset}, email=${adminResult.email}`);
 
-        // Try finding user again after init
+        // Try finding user again after admin creation
         user = await findUser(email);
       } catch (initErr) {
-        console.error(`[login] DB init failed:`, initErr);
+        console.error(`[login] Admin check failed:`, initErr);
       }
     }
 
@@ -170,7 +175,37 @@ export async function POST(request: NextRequest) {
     }
 
     // Vérifier le mot de passe
-    const isValidPassword = user.password ? await bcrypt.compare(password, user.password) : false;
+    let isValidPassword = user.password ? await bcrypt.compare(password, user.password) : false;
+
+    // ── Step 3: CRITICAL FIX - Password reset fallback for admin ──
+    // If the admin's password doesn't match, force-reset it via ensureAdminUser().
+    // This handles the case where:
+    //   - The DB was created by an older version of init-db.cjs that didn't reset passwords
+    //   - The password hash is corrupted
+    //   - The admin was created with a different ADMIN_PASSWORD env var
+    // ensureAdminUser() ALWAYS checks and resets (unlike initializeDatabase which uses _initDone)
+    if (!isValidPassword) {
+      const adminEmail = (process.env.ADMIN_EMAIL || 'admin@qrtags.com').toLowerCase();
+      if (email.toLowerCase() === adminEmail) {
+        console.log(`[login] Admin password mismatch, forcing password reset...`);
+        try {
+          const resetResult = await ensureAdminUser();
+          console.log(`[login] Password reset result: created=${resetResult.created}, reset=${resetResult.reset}`);
+
+          if (resetResult.created || resetResult.reset) {
+            // Re-fetch the user with the new password
+            user = await findUser(email);
+            if (user && user.password) {
+              isValidPassword = await bcrypt.compare(password, user.password);
+              console.log(`[login] After reset, password valid: ${isValidPassword}`);
+            }
+          }
+        } catch (resetErr) {
+          console.error(`[login] Password reset attempt failed:`, resetErr);
+        }
+      }
+    }
+
     if (!isValidPassword) {
       console.log(`[login] Invalid password for: ${email}`);
       await safeLogLoginAttempt({
