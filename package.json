@@ -5,12 +5,21 @@
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "start": "NODE_ENV=production node .next/standalone/server.js",
+    "start:bun": "NODE_ENV=production bun .next/standalone/server.js",
     "lint": "eslint .",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:migrate:prod": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset",
+    "db:seed": "npx tsx prisma/seed.ts",
+    "docker:build": "docker build -t qrtags .",
+    "docker:run": "docker run -p 3000:3000 --env-file .env -v qrtags-data:/app/data qrtags",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f",
+    "docker:rebuild": "docker compose up -d --build"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

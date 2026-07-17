@@ -1,10 +1,26 @@
-import { createServer } from 'http';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { Server } from 'socket.io';
 
-const httpServer = createServer();
+const PORT = Number(process.env.PORT) || 3005;
+
+// ── HTTP handler for health check ────────────────────────────
+const httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      status: 'healthy',
+      service: 'qrtags-websocket',
+      uptime: process.uptime(),
+      timestamp: new Date().toISOString(),
+      connections: io?.sockets.sockets.size || 0,
+    }));
+    return;
+  }
+  res.writeHead(404);
+  res.end('Not Found');
+});
 
 const io = new Server(httpServer, {
-  // DO NOT change the path — Caddy forwards based on it
   path: '/',
   cors: {
     origin: '*',
@@ -14,9 +30,7 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 });
 
-const PORT = 3005;
-
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────
 
 interface JoinPayload {
   reference: string;
@@ -27,14 +41,14 @@ interface BroadcastPayload {
   data: Record<string, unknown>;
 }
 
-// ── Connection handling ──────────────────────────────────────────────────────
+// ── Connection handling ──────────────────────────────────────
 
 io.on('connection', (socket) => {
   console.log(`[tracking-ws] client connected: ${socket.id}`);
 
   /**
-   * Client joins a room specific to a baggage reference.
-   * Room name format: bag:<reference>  (e.g. bag:Hajj26-MLQGY7)
+   * Client joins a room specific to a tag reference.
+   * Room name format: tag:<reference>  (e.g. tag:TAG-HOTEL-MLQGY7)
    */
   socket.on('join', (payload: JoinPayload) => {
     const { reference } = payload;
@@ -44,15 +58,13 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const room = `bag:${reference}`;
+    const room = `tag:${reference}`;
     socket.join(room);
     console.log(`[tracking-ws] ${socket.id} joined room ${room}`);
   });
 
   /**
-   * Demo / testing endpoint.
-   * Any connected client can emit a `broadcast` event to simulate a new scan
-   * being pushed to everyone tracking the same reference.
+   * Broadcast a scan event to everyone tracking the same reference.
    */
   socket.on('broadcast', (payload: BroadcastPayload) => {
     const { reference, data } = payload;
@@ -62,7 +74,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const room = `bag:${reference}`;
+    const room = `tag:${reference}`;
     const enriched = {
       ...data,
       _broadcastAt: new Date().toISOString(),
@@ -82,13 +94,13 @@ io.on('connection', (socket) => {
   });
 });
 
-// ── Start server ─────────────────────────────────────────────────────────────
+// ── Start server ─────────────────────────────────────────────
 
 httpServer.listen(PORT, () => {
-  console.log(`[tracking-ws] tracking WebSocket server running on port ${PORT}`);
+  console.log(`[tracking-ws] QRTags WebSocket server running on port ${PORT}`);
 });
 
-// ── Graceful shutdown ────────────────────────────────────────────────────────
+// ── Graceful shutdown ────────────────────────────────────────
 
 function shutdown(signal: string) {
   console.log(`[tracking-ws] received ${signal}, shutting down…`);

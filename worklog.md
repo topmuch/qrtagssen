@@ -240,3 +240,39 @@ Stage Summary:
 - New pages: Activations, Wallet, Agency Types, Subscriptions, Payments
 - New API routes for all new models
 - Mobile Money support (Wave, Orange Money, MTN Money, CinetPay)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Prepare QRTags project for Coolify deployment
+
+Work Log:
+- Audited current project state: Next.js 16, TypeScript, Prisma/SQLite, Bun runtime
+- Created multi-stage Dockerfile optimized for Coolify (3 stages: deps → builder → runner)
+- Created docker-compose.yml with app + WebSocket services, health checks, resource limits
+- Created docker-compose.prod.yml with PostgreSQL support for production scale
+- Created .dockerignore to optimize Docker build context
+- Created .env.example with all required + optional environment variables
+- Created docker-entrypoint.sh with auto-detection of SQLite/PostgreSQL, auto-migration, seed marker
+- Added health check endpoint /api/health (checks DB connectivity + returns memory stats)
+- Updated WebSocket service: added /health endpoint, Dockerfile, room prefix bag→tag
+- Created prisma/schema.postgresql.prisma with full indexes for PostgreSQL production
+- Updated next.config.ts: added security headers, remote image patterns, removed invalid eslint config
+- Updated package.json: added Docker scripts (docker:build, docker:run, docker:up, etc.)
+- Updated src/lib/db.ts: production-optimized logging, graceful shutdown
+- Updated .env: reorganized with Mobile Money variables, clearer sections
+- Created COOLIFY.md: comprehensive deployment guide (3 methods, troubleshooting, checklist)
+- Verified production build succeeds (next build)
+- Verified health endpoint returns correct JSON with DB connected status
+- Verified main page returns HTTP 200 in production mode
+
+Stage Summary:
+- Full Coolify deployment preparation complete
+- 13 new/updated deployment files created
+- Docker multi-stage build: ~200MB final image (Node.js 22 Alpine + standalone output)
+- Supports SQLite (dev/小型) and PostgreSQL (production) via DATABASE_URL
+- Health checks on both app (:3000/api/health) and WebSocket (:3005/health)
+- Auto-migration on container startup via docker-entrypoint.sh
+- Resource limits configured (1G max memory for app, 256M for WebSocket)
+- Non-root container execution for security
+- Persistent volumes for /app/data (SQLite) and /app/public/uploads

@@ -4,11 +4,11 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-// Force new PrismaClient to get latest schema changes
-// This ensures we have access to all models including Lead
 const createPrismaClient = () => {
   return new PrismaClient({
-    log: ['query', 'info', 'warn', 'error'],
+    log: process.env.NODE_ENV === 'development' 
+      ? ['query', 'info', 'warn', 'error'] 
+      : ['warn', 'error'],
   })
 }
 
@@ -18,5 +18,9 @@ if (process.env.NODE_ENV !== 'production') {
   globalForPrisma.prisma = db
 }
 
-// Export type for TypeScript support
+// Graceful shutdown - close Prisma connection on process exit
+process.on('beforeExit', async () => {
+  await db.$disconnect()
+})
+
 export type { PrismaClient }

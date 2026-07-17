@@ -1,0 +1,751 @@
+// QRTags - SaaS B2B de gestion d'objets perdus via QR codes
+// Prisma Schema - Production (PostgreSQL)
+// ═══════════════════════════════════════════════════════════════
+// Pour utiliser PostgreSQL en production:
+// 1. Copier ce fichier vers schema.prisma (remplaçant le fichier SQLite)
+// 2. Ou utiliser: DATABASE_URL=postgresql://... et provider="postgresql"
+// ═══════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════
+// USERS & AUTHENTICATION
+// ═══════════════════════════════════════════
+
+model User {
+  id              String        @id @default(cuid())
+  email           String        @unique
+  name            String?
+  password        String?
+  role            String        @default("agency") // "superadmin" | "admin" | "staff" | "agency"
+  agencyId        String?
+  agency          Agency?       @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  staffRole       String?
+  permissions     String        @default("[]")
+  sessions        Session[]
+  loginLogs       LoginLog[]
+  assignedLeads   Lead[]        @relation("AssignedLeads")
+  observations    Observation[]
+  dailyReports    DailyReport[]
+  blogPosts       BlogPost[]
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([email])
+  @@index([agencyId])
+  @@index([role])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userAgent    String?
+  ipAddress    String?
+  lastActivity DateTime @default(now())
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LoginLog {
+  id           String    @id @default(cuid())
+  userId       String?
+  user         User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  email        String
+  success      Boolean   @default(false)
+  failureReason String?
+  ipAddress    String?
+  userAgent    String?
+  country      String?
+  city         String?
+  createdAt    DateTime  @default(now())
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════
+// AGENCY & MULTI-MÉTIER
+// ═══════════════════════════════════════════
+
+model AgencyType {
+  id            String    @id @default(cuid())
+  name          String    @unique
+  label         String
+  icon          String
+  description   String?
+  customFields  String    @default("[]")
+  color         String    @default("#2563EB")
+  isActive      Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  agencies     Agency[]
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model Agency {
+  id                String        @id @default(cuid())
+  name              String
+  slug              String        @unique
+  agencyTypeId      String
+  agencyType        AgencyType    @relation(fields: [agencyTypeId], references: [id])
+  email             String?
+  phone             String?
+  address           String?
+  city              String?
+  country           String?
+
+  logoUrl           String?
+  primaryColor      String        @default("#2563EB")
+  secondaryColor    String        @default("#F59E0B")
+  customMessage     String?
+  contactEmail      String?
+  contactPhone      String?
+
+  active            Boolean       @default(true)
+  onboardingCompleted Boolean     @default(false)
+  onboardingStep    Int           @default(0)
+
+  users             User[]
+  tags              Tag[]
+  invoices          Invoice[]
+  subscription      Subscription?
+  wallet            Wallet?
+  messages          Message[]       @relation("AgencyMessages")
+  notifications     Notification[]  @relation("AgencyNotifications")
+  advertisements    Advertisement[] @relation("AgencyAdvertisements")
+  bookings          Booking[]
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([slug])
+  @@index([agencyTypeId])
+  @@index([active])
+}
+
+// ═══════════════════════════════════════════
+// TAGS (QR CODES) - Core Entity
+// ═══════════════════════════════════════════
+
+model Tag {
+  id                String    @id @default(cuid())
+  serialNumber      String    @unique
+  qrCodeUrl         String?
+
+  tagType           String    @default("standard")
+
+  agencyId          String?
+  agency            Agency?   @relation(fields: [agencyId], references: [id], onDelete: SetNull)
+  endUserId         String?
+
+  status            String    @default("created")
+
+  customData        String    @default("{}")
+
+  ownerName         String?
+  ownerPhone        String?
+  ownerEmail        String?
+  itemName          String?
+  itemDescription   String?
+  itemCategory      String?
+
+  locationBuilding  String?
+  locationRoom      String?
+  locationNote      String?
+
+  activatedAt       DateTime?
+  expiresAt         DateTime?
+  lastScanDate      DateTime?
+  lastLocation      String?
+  declaredLostAt    DateTime?
+  foundAt           DateTime?
+
+  founderName       String?
+  founderPhone      String?
+  founderEmail      String?
+  founderMessage    String?
+  founderAt         DateTime?
+
+  setId             String?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  scanLogs          ScanLog[]
+  bookings          Booking[]
+
+  @@index([serialNumber])
+  @@index([agencyId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([setId])
+}
+
+// ═══════════════════════════════════════════
+// BOOKINGS / ACTIVATIONS
+// ═══════════════════════════════════════════
+
+model Booking {
+  id            String    @id @default(cuid())
+  tagId         String
+  tag           Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  agencyId      String
+  agency        Agency    @relation(fields: [agencyId], references: [id])
+
+  customData    String    @default("{}")
+
+  status        String    @default("active")
+
+  activatedAt   DateTime  @default(now())
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([tagId])
+  @@index([agencyId])
+  @@index([status])
+}
+
+// ═══════════════════════════════════════════
+// SCAN LOG
+// ═══════════════════════════════════════════
+
+model ScanLog {
+  id          String   @id @default(cuid())
+  tagId       String
+  tag         Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  scannedBy   String?
+  scannerId   String?
+  scanType    String   @default("finder")
+
+  ipAddress   String?
+  country     String?
+  city        String?
+  latitude    Float?
+  longitude   Float?
+  location    String?
+
+  notes       String?
+
+  whatsappStatus  String?
+  aiAnalysis      String?
+  groqUsed        Boolean   @default(false)
+  groqLatencyMs   Int?
+  groqModelUsed   String?
+  wakitMessageId  String?
+
+  context     String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([tagId])
+  @@index([createdAt])
+  @@index([scanType])
+}
+
+// ═══════════════════════════════════════════
+// SUBSCRIPTIONS & PAYMENTS
+// ═══════════════════════════════════════════
+
+model Subscription {
+  id          String    @id @default(cuid())
+  agencyId    String    @unique
+  agency      Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  plan        String    @default("starter")
+  status      String    @default("trial")
+
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  trialEndsAt DateTime?
+
+  maxTags     Int       @default(50)
+  maxUsers    Int       @default(5)
+  maxScans    Int       @default(1000)
+
+  amount      Float     @default(0)
+  currency    String    @default("XOF")
+  billingCycle String   @default("monthly")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  payments    Payment[]
+  invoices    Invoice[]
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+model Payment {
+  id              String       @id @default(cuid())
+  agencyId        String
+  subscriptionId  String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  amount          Float
+  currency        String       @default("XOF")
+  method          String
+  status          String       @default("pending")
+  transactionId   String?
+  phoneNumber     String?
+  description     String?
+
+  paidAt          DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+  @@index([method])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════
+// WALLET
+// ═══════════════════════════════════════════
+
+model Wallet {
+  id              String    @id @default(cuid())
+  agencyId        String    @unique
+  agency          Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+
+  balance         Float     @default(0)
+  totalEarned     Float     @default(0)
+  totalWithdrawn  Float     @default(0)
+  currency        String    @default("XOF")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  transactions    WalletTransaction[]
+
+  @@index([agencyId])
+}
+
+model WalletTransaction {
+  id              String   @id @default(cuid())
+  walletId        String
+  wallet          Wallet   @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  agencyId        String
+
+  transactionType String
+  amount          Float
+  description     String
+  status          String   @default("completed")
+
+  referenceId     String?
+  referenceType   String?
+
+  createdAt       DateTime @default(now())
+
+  @@index([walletId])
+  @@index([agencyId])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════
+// MESSAGING & NOTIFICATIONS
+// ═══════════════════════════════════════════
+
+model Message {
+  id                String   @id @default(cuid())
+  type              String
+  status            String   @default("non_lu")
+  senderName        String?
+  senderEmail       String?
+  senderPhone       String?
+  agencyId          String?
+  agency            Agency?  @relation("AgencyMessages", fields: [agencyId], references: [id])
+  recipientAgencyId String?
+  subject           String?
+  content           String
+  tagId             String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Notification {
+  id          String   @id @default(cuid())
+  type        String
+  userId      String?
+  agencyId    String?
+  agency      Agency?  @relation("AgencyNotifications", fields: [agencyId], references: [id])
+  tagId       String?
+  message     String
+  data        String?
+  read        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@index([agencyId])
+  @@index([read])
+  @@index([createdAt])
+}
+
+// ═══════════════════════════════════════════
+// SYSTEM & SETTINGS
+// ═══════════════════════════════════════════
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@index([key])
+}
+
+model FeatureFlag {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  label       String
+  description String
+  category    String   @default("general")
+  enabled     Boolean  @default(false)
+  icon        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([key])
+  @@index([category])
+}
+
+model EmailSettings {
+  id              String   @id @default(cuid())
+  provider        String   @default("console")
+  fromEmail       String   @default("noreply@qrtags.com")
+  fromName        String   @default("QRTags")
+  recipientEmail  String?
+  smtpHost        String?
+  smtpPort        Int?
+  smtpUser        String?
+  smtpPassword    String?
+  smtpEncryption  String   @default("tls")
+  isActive        Boolean  @default(true)
+  lastTestAt      DateTime?
+  lastTestStatus  String?
+  lastTestError   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model EmailLog {
+  id          String   @id @default(cuid())
+  to          String
+  subject     String
+  type        String
+  status      String   @default("pending")
+  error       String?
+  userId      String?
+  agencyId    String?
+  data        String?
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([to])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model EmailToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  type      String
+  code      String?
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([email])
+}
+
+model Invoice {
+  id            String       @id @default(cuid())
+  number        String       @unique
+  agencyId      String
+  agency        Agency       @relation(fields: [agencyId], references: [id])
+  subscriptionId String?
+  subscription  Subscription? @relation(fields: [subscriptionId], references: [id])
+  amount        Float
+  currency      String       @default("XOF")
+  status        String       @default("pending")
+  description   String?
+  items         String
+  dueDate       DateTime?
+  paidAt        DateTime?
+  paymentMethod String?
+  pdfUrl        String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([agencyId])
+  @@index([status])
+}
+
+// ═══════════════════════════════════════════
+// CRM & MARKETING
+// ═══════════════════════════════════════════
+
+model Lead {
+  id            String        @id @default(cuid())
+  name          String
+  email         String
+  phone         String?
+  company       String?
+  agencyTypeId  String?
+  status        String        @default("new")
+  source        String?
+  notes         String?
+  agencyId      String?
+  assignedToId  String?
+  assignedTo    User?         @relation("AssignedLeads", fields: [assignedToId], references: [id], onDelete: SetNull)
+  observations  Observation[]
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([email])
+  @@index([status])
+  @@index([assignedToId])
+}
+
+model Observation {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  type      String
+  content   String
+  date      DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model DailyReport {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      DateTime @default(now())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+}
+
+// ═══════════════════════════════════════════
+// CONTENT & ADVERTISING
+// ═══════════════════════════════════════════
+
+model Advertisement {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  imageUrl    String
+  linkUrl     String?
+  linkTarget  String   @default("_blank")
+  position    String   @default("footer")
+  targetScope String   @default("all")
+  agencyId    String?
+  agency      Agency?  @relation("AgencyAdvertisements", fields: [agencyId], references: [id])
+  agencyTypeId String?
+  startDate   DateTime
+  endDate     DateTime?
+  status      String   @default("draft")
+  priority    Int      @default(0)
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  adImpressions AdImpression[]
+
+  @@index([status])
+  @@index([startDate])
+}
+
+model AdImpression {
+  id              String        @id @default(cuid())
+  advertisementId String
+  advertisement   Advertisement @relation(fields: [advertisementId], references: [id], onDelete: Cascade)
+  userId          String?
+  agencyId        String?
+  userRole        String?
+  action          String
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([advertisementId])
+  @@index([action])
+}
+
+model BlogPost {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  content     String
+  excerpt     String?
+  coverImage  String?
+  category    String   @default("actualites")
+  status      String   @default("draft")
+  publishedAt DateTime?
+  authorId    String?
+  author      User?    @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  views       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  blogViews   BlogView[]
+
+  @@index([slug])
+  @@index([status])
+  @@index([category])
+}
+
+model BlogView {
+  id        String   @id @default(cuid())
+  postId    String
+  post      BlogPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  userId    String?
+  agencyId  String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+// ═══════════════════════════════════════════
+// SYSTEM MONITORING
+// ═══════════════════════════════════════════
+
+model SystemLog {
+  id        String   @id @default(cuid())
+  level     String
+  message   String
+  source    String
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  @@index([level])
+  @@index([source])
+  @@index([createdAt])
+}
+
+model Page {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  title     String
+  content   String
+  published Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Banner {
+  id        String   @id @default(cuid())
+  type      String
+  content   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model LossAlert {
+  id          String   @id @default(cuid())
+  tagId       String
+  reference   String
+  alertType   String   @default("no_scan_after_activation")
+  message     String
+  dismissed   Boolean  @default(false)
+  dismissedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([tagId])
+  @@index([dismissed])
+}
+
+model Checklist {
+  id                String   @id @default(cuid())
+  code              String   @unique
+  verificationKey   String
+  firstName         String
+  lastName          String
+  email             String
+  departureDate     String
+  destinationCountry String
+  items             String
+  itemsCount        Int      @default(0)
+  photoPath         String?
+  photoSizeBytes    Int      @default(0)
+  pdfPath           String?
+  pdfSizeBytes      Int      @default(0)
+  viewCount         Int      @default(0)
+  lastViewedAt      DateTime?
+  emailSent         Boolean  @default(false)
+  emailSentAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([code])
+  @@index([email])
+  @@index([createdAt])
+}
+
+model Review {
+  id          String   @id @default(cuid())
+  name        String
+  location    String?
+  rating      Int
+  title       String?
+  content     String
+  tagRef      String?
+  isFeatured  Boolean  @default(false)
+  isApproved  Boolean  @default(false)
+  response    String?
+  language    String   @default("fr")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([isApproved])
+  @@index([isFeatured])
+  @@index([createdAt])
+}
+
+model SMSCredits {
+  id              String   @id @default(cuid())
+  agencyId        String   @unique
+  balance         Int      @default(0)
+  totalPurchased  Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([agencyId])
+}
