@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
-import { logLoginAttempt } from '@/lib/session';
 import { initializeDatabase, ensureAdminUser } from '@/lib/db-init';
 import { cookies } from 'next/headers';
 
 /**
- * Safely log a login attempt - never throws
+ * Safely log a login attempt - never throws, handles missing columns gracefully
  */
 async function safeLogLoginAttempt(params: {
   userId?: string;
@@ -15,15 +14,28 @@ async function safeLogLoginAttempt(params: {
   failureReason?: string;
 }) {
   try {
-    await logLoginAttempt(params);
+    // Use raw SQL to avoid Prisma column errors
+    const id = `ll_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const now = new Date().toISOString();
+    await db.$executeRawUnsafe(
+      `INSERT INTO LoginLog (id, userId, email, success, failureReason, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      id,
+      params.userId || null,
+      params.email,
+      params.success ? 1 : 0,
+      params.failureReason || null,
+      now
+    );
   } catch (error) {
-    console.error('[login] Failed to log login attempt:', error);
+    // Never throw - login logging is non-critical
+    console.error('[login] Failed to log login attempt:', error instanceof Error ? error.message : error);
   }
 }
 
 /**
  * Find user by email - tries Prisma first, falls back to raw SQL
- * if Prisma fails due to missing columns/tables
+ * with DYNAMIC column detection to handle missing columns.
  */
 async function findUser(email: string): Promise<{
   id: string;
@@ -35,65 +47,67 @@ async function findUser(email: string): Promise<{
   isActive: boolean;
   agency: unknown;
 } | null> {
+  const emailLower = email.toLowerCase();
+
   // Try Prisma ORM first
   try {
     const user = await db.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { email: emailLower },
       include: { agency: true },
     });
     return user;
   } catch (prismaError) {
     console.error('[login] Prisma findUnique failed, trying raw SQL:', prismaError instanceof Error ? prismaError.message : prismaError);
+  }
 
-    // Fallback: raw SQL query with only essential columns
-    try {
-      // First, check which columns exist
-      const tableInfo = await db.$queryRawUnsafe(
-        `PRAGMA table_info("User")`
-      ) as Array<{ name: string }>;
-      const existingColumns = tableInfo.map((col) => col.name);
+  // Fallback: raw SQL query with DYNAMIC column detection
+  // This handles the case where columns like `password` don't exist yet
+  try {
+    const tableInfo = await db.$queryRawUnsafe(
+      `PRAGMA table_info("User")`
+    ) as Array<{ name: string }>;
+    const existingColumns = tableInfo.map((col) => col.name);
 
-      // Build SELECT with only existing columns
-      const selectCols = [
-        'id',
-        'email',
-        existingColumns.includes('name') ? 'name' : 'NULL as name',
-        'password',
-        'role',
-        existingColumns.includes('agencyId') ? 'agencyId' : 'NULL as agencyId',
-        existingColumns.includes('isActive') ? 'isActive' : '1 as isActive',
-      ].join(', ');
+    // Build SELECT with only existing columns - ALL conditional
+    const selectCols = [
+      'id',
+      'email',
+      existingColumns.includes('name') ? 'name' : 'NULL as name',
+      existingColumns.includes('password') ? 'password' : 'NULL as password',
+      existingColumns.includes('role') ? 'role' : "'agency' as role",
+      existingColumns.includes('agencyId') ? 'agencyId' : 'NULL as agencyId',
+      existingColumns.includes('isActive') ? 'isActive' : '1 as isActive',
+    ].join(', ');
 
-      const users = await db.$queryRawUnsafe(
-        `SELECT ${selectCols} FROM User WHERE email = ? LIMIT 1`,
-        email.toLowerCase()
-      ) as Array<{
-        id: string;
-        email: string;
-        name: string | null;
-        password: string | null;
-        role: string;
-        agencyId: string | null;
-        isActive: number;
-      }>;
+    const users = await db.$queryRawUnsafe(
+      `SELECT ${selectCols} FROM User WHERE email = ? LIMIT 1`,
+      emailLower
+    ) as Array<{
+      id: string;
+      email: string;
+      name: string | null;
+      password: string | null;
+      role: string;
+      agencyId: string | null;
+      isActive: number;
+    }>;
 
-      if (users.length === 0) return null;
+    if (users.length === 0) return null;
 
-      const u = users[0];
-      return {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        password: u.password,
-        role: u.role,
-        agencyId: u.agencyId,
-        isActive: !!u.isActive,
-        agency: null,
-      };
-    } catch (rawError) {
-      console.error('[login] Raw SQL also failed:', rawError instanceof Error ? rawError.message : rawError);
-      return null;
-    }
+    const u = users[0];
+    return {
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      password: u.password,
+      role: u.role,
+      agencyId: u.agencyId,
+      isActive: !!u.isActive,
+      agency: null,
+    };
+  } catch (rawError) {
+    console.error('[login] Raw SQL also failed:', rawError instanceof Error ? rawError.message : rawError);
+    return null;
   }
 }
 
@@ -117,22 +131,24 @@ export async function POST(request: NextRequest) {
 
     console.log(`[login] Attempt: email=${email.toLowerCase()}, role=${role}`);
 
-    // ── Step 1: Ensure database tables exist (runs once per process) ──
+    // ── Step 1: Ensure database is fully initialized ──
+    // This creates tables AND adds missing columns via ALTER TABLE
     try {
-      await initializeDatabase();
-    } catch {
-      // Non-fatal - tables might already exist
+      const initResult = await initializeDatabase();
+      if (initResult.columns.migrated.length > 0) {
+        console.log(`[login] DB columns migrated: ${initResult.columns.migrated.join(', ')}`);
+      }
+    } catch (initErr) {
+      console.error('[login] DB init failed (non-fatal):', initErr instanceof Error ? initErr.message : initErr);
     }
 
     // Rechercher l'utilisateur (with fallback for missing columns/tables)
     let user = await findUser(email);
 
-    // ── Step 2: Auto-initialize admin if user not found ──
+    // ── Step 2: Force admin user creation if not found ──
     if (!user) {
       console.log(`[login] User not found, forcing admin check...`);
       try {
-        // Call ensureAdminUser DIRECTLY (bypasses _initDone flag)
-        // This guarantees the admin user is created if it should exist
         const adminResult = await ensureAdminUser();
         console.log(`[login] Admin check result: created=${adminResult.created}, reset=${adminResult.reset}, email=${adminResult.email}`);
 
@@ -157,7 +173,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`[login] User found: ${user.email}, role=${user.role}, isActive=${user.isActive}`);
+    console.log(`[login] User found: ${user.email}, role=${user.role}, isActive=${user.isActive}, hasPassword=${!!user.password}`);
 
     // Vérifier que le compte est actif
     if (!user.isActive) {
@@ -177,13 +193,13 @@ export async function POST(request: NextRequest) {
     // Vérifier le mot de passe
     let isValidPassword = user.password ? await bcrypt.compare(password, user.password) : false;
 
-    // ── Step 3: CRITICAL FIX - Password reset fallback for admin ──
-    // If the admin's password doesn't match, force-reset it via ensureAdminUser().
-    // This handles the case where:
-    //   - The DB was created by an older version of init-db.cjs that didn't reset passwords
-    //   - The password hash is corrupted
-    //   - The admin was created with a different ADMIN_PASSWORD env var
-    // ensureAdminUser() ALWAYS checks and resets (unlike initializeDatabase which uses _initDone)
+    // ── Step 3: Password reset fallback for admin ──
+    // If the admin's password doesn't match (or is null/missing),
+    // force-reset it via ensureAdminUser().
+    // This handles:
+    //   - Missing `password` column that was just added by ALTER TABLE
+    //   - Corrupted password hash
+    //   - Admin created with different ADMIN_PASSWORD env var
     if (!isValidPassword) {
       const adminEmail = (process.env.ADMIN_EMAIL || 'admin@qrtags.com').toLowerCase();
       if (email.toLowerCase() === adminEmail) {
