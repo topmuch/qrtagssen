@@ -284,7 +284,10 @@ export default function AdminLoginPage() {
         login(data.user);
         router.push('/admin/tableau-de-bord');
       } else {
-        setError(data.error || 'Identifiants incorrects');
+        // Show the API error, and include detail if available (for debugging)
+        const errorMsg = data.error || 'Identifiants incorrects';
+        const debugDetail = data.detail ? ` (${data.detail})` : '';
+        setError(errorMsg + debugDetail);
       }
     } catch (err) {
       console.error('Login error:', err);

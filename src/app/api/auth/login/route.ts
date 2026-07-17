@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import bcrypt from 'bcryptjs';
-import { createSession, logLoginAttempt } from '@/lib/session';
+import { logLoginAttempt } from '@/lib/session';
+import { cookies } from 'next/headers';
 
 /**
  * Safely log a login attempt - never throws
@@ -15,20 +16,29 @@ async function safeLogLoginAttempt(params: {
   try {
     await logLoginAttempt(params);
   } catch (error) {
-    console.error('Failed to log login attempt:', error);
+    console.error('[login] Failed to log login attempt:', error);
   }
 }
 
 export async function POST(request: NextRequest) {
-  const { email, password, role } = await request.json();
+  let email = '';
+  let password = '';
+  let role = '';
 
   try {
+    const body = await request.json();
+    email = body.email || '';
+    password = body.password || '';
+    role = body.role || '';
+
     if (!email || !password) {
       return NextResponse.json(
         { error: 'Email et mot de passe requis' },
         { status: 400 }
       );
     }
+
+    console.log(`[login] Attempt: email=${email.toLowerCase()}, role=${role}`);
 
     // Rechercher l'utilisateur
     const user = await db.user.findUnique({
@@ -39,7 +49,7 @@ export async function POST(request: NextRequest) {
     });
 
     if (!user) {
-      // Log failed attempt - user not found
+      console.log(`[login] User not found: ${email}`);
       await safeLogLoginAttempt({
         email,
         success: false,
@@ -52,10 +62,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    console.log(`[login] User found: ${user.email}, role=${user.role}, isActive=${user.isActive}`);
+
+    // Vérifier que le compte est actif
+    if (!user.isActive) {
+      await safeLogLoginAttempt({
+        userId: user.id,
+        email,
+        success: false,
+        failureReason: 'Compte désactivé',
+      });
+
+      return NextResponse.json(
+        { error: 'Votre compte a été désactivé. Contactez un administrateur.' },
+        { status: 403 }
+      );
+    }
+
     // Vérifier le mot de passe
     const isValidPassword = user.password ? await bcrypt.compare(password, user.password) : false;
     if (!isValidPassword) {
-      // Log failed attempt - wrong password
+      console.log(`[login] Invalid password for: ${email}`);
       await safeLogLoginAttempt({
         userId: user.id,
         email,
@@ -71,6 +98,7 @@ export async function POST(request: NextRequest) {
 
     // Vérifier le rôle
     if ((role === 'admin' || role === 'superadmin') && user.role !== 'superadmin') {
+      console.log(`[login] Role denied: ${user.role} tried admin access`);
       await safeLogLoginAttempt({
         userId: user.id,
         email,
@@ -98,8 +126,61 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Créer une session sécurisée avec cookie HTTP-only
-    await createSession(user.id);
+    // ── Create session and set cookies ──
+    let sessionCreated = false;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    try {
+      // Create session in database
+      const session = await db.session.create({
+        data: {
+          userId: user.id,
+          expiresAt,
+          ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     request.headers.get('x-real-ip') || null,
+          userAgent: request.headers.get('user-agent') || null,
+          lastActivity: new Date(),
+        },
+      });
+
+      // Set HTTP-only session cookie
+      const cookieStore = await cookies();
+      cookieStore.set('qrtags_session', session.id, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/',
+      });
+
+      sessionCreated = true;
+      console.log(`[login] Session created for: ${email}`);
+    } catch (sessionError) {
+      console.error('[login] Session creation failed:', sessionError);
+      // Continue without session - user data will still be returned
+    }
+
+    // Always set a fallback user-id cookie (non-HTTP-only, readable by client)
+    // This ensures the client knows who's logged in even if the Session table fails
+    try {
+      const cookieStore = await cookies();
+      cookieStore.set('qrtags_user_id', user.id, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/',
+      });
+      cookieStore.set('qrtags_user_role', user.role, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        expires: expiresAt,
+        path: '/',
+      });
+    } catch (cookieError) {
+      console.error('[login] Fallback cookie failed:', cookieError);
+    }
 
     // Log successful login
     await safeLogLoginAttempt({
@@ -108,8 +189,10 @@ export async function POST(request: NextRequest) {
       success: true,
     });
 
+    console.log(`[login] Success: ${email}, redirect to ${user.role === 'superadmin' ? '/admin/tableau-de-bord' : '/agence/tableau-de-bord'}`);
+
     // Retourner les infos utilisateur (sans le mot de passe)
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       user: {
         id: user.id,
@@ -120,19 +203,32 @@ export async function POST(request: NextRequest) {
         agency: user.agency,
       },
       redirectUrl: user.role === 'superadmin' ? '/admin/tableau-de-bord' : '/agence/tableau-de-bord',
+      sessionCreated,
     });
-  } catch (error) {
-    console.error('Login error:', error);
 
-    // Log error (wrapped in try/catch to prevent double-throw)
+    return response;
+  } catch (error) {
+    console.error('[login] Server error:', error);
+
+    // Log error
     await safeLogLoginAttempt({
       email,
       success: false,
       failureReason: 'Erreur serveur',
     });
 
+    // Return detailed error for debugging
+    const errorDetail = error instanceof Error ? error.message : String(error);
+    const errorName = error instanceof Error ? error.name : 'UNKNOWN';
+
+    console.error('[login] Error detail:', errorDetail);
+
     return NextResponse.json(
-      { error: 'Erreur serveur' },
+      {
+        error: 'Erreur serveur',
+        detail: errorDetail,
+        code: errorName,
+      },
       { status: 500 }
     );
   }
