@@ -117,7 +117,24 @@ export async function POST(request: NextRequest) {
     console.log(`[login] Attempt: email=${email.toLowerCase()}, role=${role}`);
 
     // Rechercher l'utilisateur (with fallback for missing columns)
-    const user = await findUser(email);
+    let user = await findUser(email);
+
+    // ── Auto-initialize if user not found ──
+    // If the admin user doesn't exist, trigger DB initialization
+    if (!user) {
+      console.log(`[login] User not found, triggering auto-init...`);
+      try {
+        // Ensure tables and admin user exist
+        const initResponse = await fetch(`${request.nextUrl.origin}/api/auth/init`, { method: 'POST' });
+        const initData = await initResponse.json();
+        console.log(`[login] Auto-init result:`, JSON.stringify(initData).substring(0, 200));
+
+        // Try finding user again after init
+        user = await findUser(email);
+      } catch (initErr) {
+        console.error(`[login] Auto-init failed:`, initErr);
+      }
+    }
 
     if (!user) {
       console.log(`[login] User not found: ${email}`);
