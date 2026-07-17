@@ -1,0 +1,787 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback } from 'react';
+     4→     4→import { useRouter } from 'next/navigation';
+     5→     5→import Link from 'next/link';
+     6→     6→import { useAuth } from '@/contexts/AuthContext';
+     7→     7→import {
+     8→     8→  Mail,
+     9→     9→  Lock,
+    10→    10→  Eye,
+    11→    11→  EyeOff,
+    12→    12→  ArrowRight,
+    13→    13→  Loader2,
+    14→    14→  Shield,
+    15→    15→  QrCode,
+    16→    16→  Fingerprint,
+    17→    17→  KeyRound,
+    18→    18→  Activity,
+    19→    19→  Server,
+    20→    20→  type LucideIcon,
+    21→    21→} from 'lucide-react';
+    22→    22→import { motion, AnimatePresence } from 'framer-motion';
+    23→    23→
+    24→    24→/* ══════════════════════════════════════════════════════════════
+    25→    25→   DATA
+    26→    26→   ══════════════════════════════════════════════════════════════ */
+    27→    27→
+    28→    28→const STATS = [
+    29→    29→  { value: '2M+', label: 'Objets protégés', icon: QrCode },
+    30→    30→  { value: '850+', label: 'Agences partenaires', icon: Server },
+    31→    31→  { value: '45+', label: 'Pays couverts', icon: Activity },
+    32→    32→  { value: '99.9%', label: 'Disponibilité', icon: Shield },
+    33→    33→] as const;
+    34→    34→
+    35→    35→const TESTIMONIALS = [
+    36→    36→  {
+    37→    37→    name: 'Fatou Diallo',
+    38→    38→    role: 'Hôtel Lumière',
+    39→    39→    text: 'QRTags a transformé notre gestion de bagages. Zéro perte depuis 2 ans.',
+    40→    40→  },
+    41→    41→  {
+    42→    42→    name: 'Moussa Koné',
+    43→    43→    role: 'Transport Sahel',
+    44→    44→    text: 'Le dashboard est simple et efficace. Nos clients sont rassurés.',
+    45→    45→  },
+    46→    46→] as const;
+    47→    47→
+    48→    48→/* ══════════════════════════════════════════════════════════════
+    49→    49→   HEXAGONAL GRID — SVG ANIMATED BACKGROUND
+    50→    50→   ══════════════════════════════════════════════════════════════ */
+    51→    51→
+    52→    52→function HexagonalGrid() {
+    53→    53→  const hexSize = 50;
+    54→    54→  const hexWidth = hexSize * 2;
+    55→    55→  const hexHeight = Math.sqrt(3) * hexSize;
+    56→    56→  const cols = 6;
+    57→    57→  const rows = 5;
+    58→    58→
+    59→    59→  const hexPoints = (cx: number, cy: number): string => {
+    60→    60→    const pts: string[] = [];
+    61→    61→    for (let i = 0; i < 6; i++) {
+    62→    62→      const angle = (Math.PI / 180) * (60 * i - 30);
+    63→    63→      pts.push(`${cx + hexSize * Math.cos(angle)},${cy + hexSize * Math.sin(angle)}`);
+    64→    64→    }
+    65→    65→    return pts.join(' ');
+    66→    66→  };
+    67→    67→
+    68→    68→  const hexagons: { cx: number; cy: number; key: number }[] = [];
+    69→    69→  let keyIdx = 0;
+    70→    70→  for (let row = 0; row < rows; row++) {
+    71→    71→    for (let col = 0; col < cols; col++) {
+    72→    72→      const offsetX = row % 2 !== 0 ? hexWidth * 0.75 : 0;
+    73→    73→      const cx = col * hexWidth * 0.75 + offsetX;
+    74→    74→      const cy = row * hexHeight;
+    75→    75→      hexagons.push({ cx, cy, key: keyIdx++ });
+    76→    76→    }
+    77→    77→  }
+    78→    78→
+    79→    79→  return (
+    80→    80→    <svg
+    81→    81→      className="absolute inset-0 w-full h-full"
+    82→    82→      viewBox={`0 0 ${cols * hexWidth * 0.75 + hexWidth} ${rows * hexHeight}`}
+    83→    83→      preserveAspectRatio="xMidYMid slice"
+    84→    84→    >
+    85→    85→      <defs>
+    86→    86→        <linearGradient id="hex-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+    87→    87→          <stop offset="0%" stopColor="#7C3AED" stopOpacity="0.2" />
+    88→    88→          <stop offset="100%" stopColor="#8B5CF6" stopOpacity="0.05" />
+    89→    89→        </linearGradient>
+    90→    90→      </defs>
+    91→    91→      {hexagons.map((hex) => (
+    92→    92→        <polygon
+    93→    93→          key={hex.key}
+    94→    94→          points={hexPoints(hex.cx, hex.cy)}
+    95→    95→          fill="none"
+    96→    96→          stroke="url(#hex-stroke)"
+    97→    97→          strokeWidth="0.8"
+    98→    98→          opacity={0.2 + (hex.key % 3) * 0.1}
+    99→    99→        />
+   100→   100→      ))}
+   101→   101→    </svg>
+   102→   102→  );
+   103→   103→}
+   104→   104→
+   105→   105→/* ══════════════════════════════════════════════════════════════
+   106→   106→   DATA FLOW LINES — animated SVG lines
+   107→   107→   ══════════════════════════════════════════════════════════════ */
+   108→   108→
+   109→   109→function DataFlowLines() {
+   110→   110→  const lines = [
+   111→   111→    { x1: '10%', y1: '15%', x2: '60%', y2: '25%', dur: '4s' },
+   112→   112→    { x1: '20%', y1: '40%', x2: '80%', y2: '35%', dur: '5s' },
+   113→   113→    { x1: '5%', y1: '70%', x2: '70%', y2: '60%', dur: '3.5s' },
+   114→   114→    { x1: '30%', y1: '85%', x2: '90%', y2: '75%', dur: '4.5s' },
+   115→   115→    { x1: '15%', y1: '55%', x2: '50%', y2: '50%', dur: '3s' },
+   116→   116→  ];
+   117→   117→
+   118→   118→  return (
+   119→   119→    <svg className="absolute inset-0 w-full h-full pointer-events-none" preserveAspectRatio="none">
+   120→   120→      <defs>
+   121→   121→        <linearGradient id="flow-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+   122→   122→          <stop offset="0%" stopColor="#7C3AED" stopOpacity="0" />
+   123→   123→          <stop offset="50%" stopColor="#8B5CF6" stopOpacity="0.4" />
+   124→   124→          <stop offset="100%" stopColor="#7C3AED" stopOpacity="0" />
+   125→   125→        </linearGradient>
+   126→   126→      </defs>
+   127→   127→      {lines.map((line, i) => (
+   128→   128→        <line
+   129→   129→          key={i}
+   130→   130→          x1={line.x1}
+   131→   131→          y1={line.y1}
+   132→   132→          x2={line.x2}
+   133→   133→          y2={line.y2}
+   134→   134→          stroke="url(#flow-grad)"
+   135→   135→          strokeWidth="1"
+   136→   136→          strokeDasharray="8 12"
+   137→   137→        >
+   138→   138→          <animate
+   139→   139→            attributeName="stroke-dashoffset"
+   140→   140→            values="0;-40"
+   141→   141→            dur={line.dur}
+   142→   142→            repeatCount="indefinite"
+   143→   143→          />
+   144→   144→        </line>
+   145→   145→      ))}
+   146→   146→    </svg>
+   147→   147→  );
+   148→   148→}
+   149→   149→
+   150→   150→/* ══════════════════════════════════════════════════════════════
+   151→   151→   PULSING CIRCLES — concentric radar rings
+   152→   152→   ══════════════════════════════════════════════════════════════ */
+   153→   153→
+   154→   154→function PulsingCircles() {
+   155→   155→  return (
+   156→   156→    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+   157→   157→      {[80, 140, 210, 290].map((size, i) => (
+   158→   158→        <div
+   159→   159→          key={i}
+   160→   160→          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-blue-500/20 animate-pulse"
+   161→   161→          style={{
+   162→   162→            width: size,
+   163→   163→            height: size,
+   164→   164→            animationDuration: `${3 + i * 0.7}s`,
+   165→   165→            animationDelay: `${i * 0.5}s`,
+   166→   166→          }}
+   167→   167→        />
+   168→   168→      ))}
+   169→   169→    </div>
+   170→   170→  );
+   171→   171→}
+   172→   172→
+   173→   173→/* ══════════════════════════════════════════════════════════════
+   174→   174→   STAT CARD (left panel)
+   175→   175→   ══════════════════════════════════════════════════════════════ */
+   176→   176→
+   177→   177→function StatCard({ value, label, icon: Icon }: { value: string; label: string; icon: LucideIcon }) {
+   178→   178→  return (
+   179→   179→    <motion.div
+   180→   180→      initial={{ opacity: 0, y: 20 }}
+   181→   181→      animate={{ opacity: 1, y: 0 }}
+   182→   182→      transition={{ duration: 0.6, ease: 'easeOut' }}
+   183→   183→      className="text-center group"
+   184→   184→    >
+   185→   185→      <div className="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 mb-2 group-hover:bg-blue-500/20 transition-colors">
+   186→   186→        <Icon className="w-4 h-4 text-blue-400" />
+   187→   187→      </div>
+   188→   188→      <p className="text-2xl xl:text-3xl font-bold text-white tracking-tight" style={{ textShadow: '0 0 20px rgba(139, 92, 246, 0.4)' }}>
+   189→   189→        {value}
+   190→   190→      </p>
+   191→   191→      <p className="text-white/35 text-[10px] xl:text-xs mt-1 leading-tight uppercase tracking-wider">
+   192→   192→        {label}
+   193→   193→      </p>
+   194→   194→    </motion.div>
+   195→   195→  );
+   196→   196→}
+   197→   197→
+   198→   198→/* ══════════════════════════════════════════════════════════════
+   199→   199→   ANIMATION VARIANTS
+   200→   200→   ══════════════════════════════════════════════════════════════ */
+   201→   201→
+   202→   202→const fadeSlideUp = {
+   203→   203→  initial: { opacity: 0, y: 24 },
+   204→   204→  animate: { opacity: 1, y: 0 },
+   205→   205→  transition: { duration: 0.6, ease: [0.25, 0.46, 0.45, 0.94] },
+   206→   206→};
+   207→   207→
+   208→   208→const staggerContainer = {
+   209→   209→  animate: { transition: { staggerChildren: 0.1, delayChildren: 0.2 } },
+   210→   210→};
+   211→   211→
+   212→   212→const formChild = {
+   213→   213→  initial: { opacity: 0, y: 16 },
+   214→   214→  animate: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } },
+   215→   215→};
+   216→   216→
+   217→   217→/* ══════════════════════════════════════════════════════════════
+   218→   218→   ADMIN LOGIN PAGE
+   219→   219→   ══════════════════════════════════════════════════════════════ */
+   220→   220→
+   221→   221→export default function AdminLoginPage() {
+   222→   222→  const router = useRouter();
+   223→   223→  const { user, login, loading: authLoading, isAgency, isSuperAdmin } = useAuth();
+   224→   224→
+   225→   225→  const [email, setEmail] = useState('');
+   226→   226→  const [password, setPassword] = useState('');
+   227→   227→  const [showPassword, setShowPassword] = useState(false);
+   228→   228→  const [error, setError] = useState('');
+   229→   229→  const [loading, setLoading] = useState(false);
+   230→   230→  const [rememberMe, setRememberMe] = useState(false);
+   231→   231→  const [focusedField, setFocusedField] = useState<string | null>(null);
+   232→   232→  const [activeTestimonial, setActiveTestimonial] = useState(0);
+   233→   233→
+   234→   234→  /* ─── Redirect if already logged in as superadmin ─── */
+   235→   235→  useEffect(() => {
+   236→   236→    if (authLoading) return;
+   237→   237→    if (user && isSuperAdmin) {
+   238→   238→      router.replace('/admin/tableau-de-bord');
+   239→   239→    }
+   240→   240→  }, [user, authLoading, isSuperAdmin, router]);
+   241→   241→
+   242→   242→  /* ─── Rotate testimonials every 5s ─── */
+   243→   243→  useEffect(() => {
+   244→   244→    const interval = setInterval(() => {
+   245→   245→      setActiveTestimonial((prev) => (prev + 1) % TESTIMONIALS.length);
+   246→   246→    }, 5000);
+   247→   247→    return () => clearInterval(interval);
+   248→   248→  }, []);
+   249→   249→
+   250→   250→  /* ─── Submit handler ─── */
+   251→   251→  const handleSubmit = async (e: React.FormEvent) => {
+   252→   252→    e.preventDefault();
+   253→   253→    setError('');
+   254→   254→    setLoading(true);
+   255→   255→
+   256→   256→    try {
+   257→   257→      const response = await fetch('/api/auth/login', {
+   258→   258→        method: 'POST',
+   259→   259→        headers: { 'Content-Type': 'application/json' },
+   260→   260→        body: JSON.stringify({ email, password, role: 'superadmin' }),
+   261→   261→      });
+   262→   262→
+   263→   263→      const data = await response.json();
+   264→   264→
+   265→   265→      if (response.ok && data.success) {
+   266→   266→        login(data.user);
+   267→   267→        router.push('/admin/tableau-de-bord');
+   268→   268→      } else {
+   269→   269→        setError(data.error || 'Identifiants incorrects');
+   270→   270→      }
+   271→   271→    } catch (err) {
+   272→   272→      console.error('Login error:', err);
+   273→   273→      setError('Erreur de connexion. Veuillez réessayer.');
+   274→   274→    } finally {
+   275→   275→      setLoading(false);
+   276→   276→    }
+   277→   277→  };
+   278→   278→
+   279→   279→  /* ─── Demo fill ─── */
+   280→   280→  const fillDemo = useCallback(() => {
+   281→   281→    setEmail('admin@qrtags.com');
+   282→   282→    setPassword('admin123');
+   283→   283→  }, []);
+   284→   284→
+   285→   285→  const currentTestimonial = TESTIMONIALS[activeTestimonial];
+   286→   286→  const initials = currentTestimonial.name
+   287→   287→    .split(' ')
+   288→   288→    .map((n) => n[0])
+   289→   289→    .join('');
+   290→   290→
+   291→   291→  return (
+   292→   292→    <div className="min-h-screen flex flex-col lg:flex-row bg-[#10B981] overflow-hidden">
+   293→   293→      {/* ════════════════════════════════════════════════════════
+   294→   294→          LEFT PANEL — "Midnight Command Center" (desktop only)
+   295→   295→          ════════════════════════════════════════════════════════ */}
+   296→   296→      <div className="relative hidden lg:flex lg:w-[52%] min-h-screen flex-col overflow-hidden">
+   297→   297→        {/* Deep midnight gradient base */}
+   298→   298→        <div className="absolute inset-0">
+   299→   299→          <div
+   300→   300→            className="absolute inset-0"
+   301→   301→            style={{
+   302→   302→              background:
+   303→   303→                'radial-gradient(ellipse at 30% 20%, rgba(0, 71, 214, 0.15) 0%, transparent 60%), radial-gradient(ellipse at 80% 80%, rgba(0, 71, 214, 0.10) 0%, transparent 50%), linear-gradient(160deg, #10B981 0%, #059669 40%, #10B981 100%)',
+   304→   304→            }}
+   305→   305→          />
+   306→   306→        </div>
+   307→   307→
+   308→   308→        {/* Hexagonal grid overlay */}
+   309→   309→        <HexagonalGrid />
+   310→   310→
+   311→   311→        {/* Data flow lines */}
+   312→   312→        <DataFlowLines />
+   313→   313→
+   314→   314→        {/* Pulsing radar circles */}
+   315→   315→        <PulsingCircles />
+   316→   316→
+   317→   317→        {/* Floating violet/purple orbs */}
+   318→   318→        <div className="absolute top-[15%] -left-16 w-72 h-72 rounded-full bg-blue-600/15 blur-[100px] animate-pulse" />
+   319→   319→        <div
+   320→   320→          className="absolute bottom-[20%] right-[-40px] w-80 h-80 rounded-full bg-blue-600/10 blur-[120px] animate-pulse"
+   321→   321→          style={{ animationDelay: '1.5s' }}
+   322→   322→        />
+   323→   323→        <div
+   324→   324→          className="absolute top-[50%] left-[40%] w-96 h-96 rounded-full bg-blue-500/5 blur-[150px] animate-pulse"
+   325→   325→          style={{ animationDelay: '3s' }}
+   326→   326→        />
+   327→   327→        <div
+   328→   328→          className="absolute bottom-[5%] left-[15%] w-48 h-48 rounded-full bg-yellow-500/8 blur-[80px] animate-pulse"
+   329→   329→          style={{ animationDelay: '2s' }}
+   330→   330→        />
+   331→   331→
+   332→   332→        {/* ─── Left Panel Content ─── */}
+   333→   333→        <div className="relative z-10 flex flex-col h-full p-10 xl:p-14">
+   334→   334→          {/* Top: Logo in glowing frame */}
+   335→   335→          <motion.div
+   336→   336→            initial={{ opacity: 0, x: -20 }}
+   337→   337→            animate={{ opacity: 1, x: 0 }}
+   338→   338→            transition={{ duration: 0.7, ease: 'easeOut' }}
+   339→   339→          >
+   340→   340→            <Link href="/" className="group inline-block">
+   341→   341→              <div className="relative w-20 h-20 rounded-2xl bg-white/[0.07] backdrop-blur-sm p-2 border border-blue-500/20 flex items-center justify-center group-hover:bg-white/[0.12] group-hover:border-blue-500/40 transition-all duration-300">
+   342→   342→                {/* Glow effect behind logo */}
+   343→   343→                <div className="absolute -inset-1 rounded-2xl bg-blue-500/10 blur-lg opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+   344→   344→                <img src="/logo.png" alt="QRTags" className="w-full h-full object-contain relative z-10" />
+   345→   345→              </div>
+   346→   346→            </Link>
+   347→   347→          </motion.div>
+   348→   348→
+   349→   349→          {/* Middle: Hero Content */}
+   350→   350→          <div className="flex-1 flex flex-col justify-center max-w-lg">
+   351→   351→            {/* Floating QR illustration */}
+   352→   352→            <motion.div
+   353→   353→              className="relative mb-10"
+   354→   354→              initial={{ opacity: 0, scale: 0.8 }}
+   355→   355→              animate={{ opacity: 1, scale: 1 }}
+   356→   356→              transition={{ duration: 0.7, delay: 0.2, ease: [0.34, 1.56, 0.64, 1] }}
+   357→   357→            >
+   358→   358→              <div className="relative w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 flex items-center justify-center shadow-2xl shadow-blue-600/30">
+   359→   359→                <QrCode className="w-10 h-10 text-white" />
+   360→   360→                {/* Animated ring */}
+   361→   361→                <div className="absolute -inset-2 rounded-2xl border-2 border-blue-400/30 animate-ping" style={{ animationDuration: '3s' }} />
+   362→   362→              </div>
+   363→   363→              {/* Decorative floating dots */}
+   364→   364→              <div
+   365→   365→                className="absolute -top-3 -right-3 w-5 h-5 rounded-full bg-emerald-400/70 animate-bounce"
+   366→   366→                style={{ animationDelay: '0.5s', animationDuration: '2.5s' }}
+   367→   367→              />
+   368→   368→              <div
+   369→   369→                className="absolute -bottom-2 -right-6 w-3.5 h-3.5 rounded-full bg-amber-400/50 animate-bounce"
+   370→   370→                style={{ animationDelay: '1.2s', animationDuration: '3s' }}
+   371→   371→              />
+   372→   372→              <div
+   373→   373→                className="absolute -top-1 -left-5 w-4 h-4 rounded-full bg-blue-300/40 animate-bounce"
+   374→   374→                style={{ animationDelay: '0.8s', animationDuration: '2.8s' }}
+   375→   375→              />
+   376→   376→            </motion.div>
+   377→   377→
+   378→   378→            <motion.h2
+   379→   379→              className="text-4xl xl:text-5xl font-bold text-white mb-4 leading-[1.1]"
+   380→   380→              initial={{ opacity: 0, y: 20 }}
+   381→   381→              animate={{ opacity: 1, y: 0 }}
+   382→   382→              transition={{ duration: 0.7, delay: 0.35 }}
+   383→   383→            >
+   384→   384→              Centre de contrôle
+   385→   385→              <br />
+   386→   386→              <span
+   387→   387→                className="bg-clip-text text-transparent"
+   388→   388→                style={{
+   389→   389→                  backgroundImage:
+   390→   390→                    'linear-gradient(135deg, #a78bfa 0%, #c4b5fd 40%, #8B5CF6 70%, #7C3AED 100%)',
+   391→   391→                }}
+   392→   392→              >
+   393→   393→                de la plateforme
+   394→   394→              </span>
+   395→   395→              <br />
+   396→   396→              QRTags.
+   397→   397→            </motion.h2>
+   398→   398→
+   399→   399→            <motion.p
+   400→   400→              className="text-white/40 text-lg leading-relaxed mb-10 max-w-md"
+   401→   401→              initial={{ opacity: 0, y: 20 }}
+   402→   402→              animate={{ opacity: 1, y: 0 }}
+   403→   403→              transition={{ duration: 0.7, delay: 0.5 }}
+   404→   404→            >
+   405→   405→              Administration sécurisée. Surveillez les opérations, gérez les agences
+   406→   406→              et pilotez l&apos;infrastructure mondiale de suivi.
+   407→   407→            </motion.p>
+   408→   408→
+   409→   409→            {/* Stats row */}
+   410→   410→            <motion.div
+   411→   411→              className="grid grid-cols-4 gap-4"
+   412→   412→              variants={staggerContainer}
+   413→   413→              initial="initial"
+   414→   414→              animate="animate"
+   415→   415→            >
+   416→   416→              {STATS.map((stat, i) => (
+   417→   417→                <StatCard key={i} value={stat.value} label={stat.label} icon={stat.icon} />
+   418→   418→              ))}
+   419→   419→            </motion.div>
+   420→   420→          </div>
+   421→   421→
+   422→   422→          {/* Bottom: Testimonials */}
+   423→   423→          <motion.div
+   424→   424→            className="relative"
+   425→   425→            initial={{ opacity: 0, y: 20 }}
+   426→   426→            animate={{ opacity: 1, y: 0 }}
+   427→   427→            transition={{ duration: 0.7, delay: 0.9 }}
+   428→   428→          >
+   429→   429→            <div className="border-l-2 border-blue-500/40 pl-5">
+   430→   430→              <AnimatePresence mode="wait">
+   431→   431→                <motion.div
+   432→   432→                  key={activeTestimonial}
+   433→   433→                  initial={{ opacity: 0, x: 10 }}
+   434→   434→                  animate={{ opacity: 1, x: 0 }}
+   435→   435→                  exit={{ opacity: 0, x: -10 }}
+   436→   436→                  transition={{ duration: 0.4 }}
+   437→   437→                >
+   438→   438→                  <p className="text-white/50 text-sm italic leading-relaxed mb-3">
+   439→   439→                    &ldquo;{currentTestimonial.text}&rdquo;
+   440→   440→                  </p>
+   441→   441→                  <div className="flex items-center gap-3">
+   442→   442→                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-700 flex items-center justify-center border border-blue-500/30">
+   443→   443→                      <span className="text-white text-xs font-bold">{initials}</span>
+   444→   444→                    </div>
+   445→   445→                    <div>
+   446→   446→                      <p className="text-white/75 text-xs font-medium">{currentTestimonial.name}</p>
+   447→   447→                      <p className="text-white/30 text-[10px]">{currentTestimonial.role}</p>
+   448→   448→                    </div>
+   449→   449→                  </div>
+   450→   450→                </motion.div>
+   451→   451→              </AnimatePresence>
+   452→   452→            </div>
+   453→   453→
+   454→   454→            {/* Dots indicator */}
+   455→   455→            <div className="flex gap-1.5 mt-4">
+   456→   456→              {TESTIMONIALS.map((_, i) => (
+   457→   457→                <button
+   458→   458→                  key={i}
+   459→   459→                  onClick={() => setActiveTestimonial(i)}
+   460→   460→                  className={`h-1.5 rounded-full transition-all duration-300 ${
+   461→   461→                    i === activeTestimonial
+   462→   462→                      ? 'bg-blue-500 w-5'
+   463→   463→                      : 'bg-white/15 hover:bg-white/25 w-1.5'
+   464→   464→                  }`}
+   465→   465→                  aria-label={`Témoignage ${i + 1}`}
+   466→   466→                />
+   467→   467→              ))}
+   468→   468→            </div>
+   469→   469→          </motion.div>
+   470→   470→        </div>
+   471→   471→      </div>
+   472→   472→
+   473→   473→      {/* ════════════════════════════════════════════════════════
+   474→   474→          RIGHT PANEL — DARK MODE FORM
+   475→   475→          ════════════════════════════════════════════════════════ */}
+   476→   476→      <div className="w-full lg:w-[48%] min-h-screen flex items-center justify-center bg-[#10B981] px-6 py-12 sm:px-10 relative">
+   477→   477→        {/* Subtle right-side background treatment */}
+   478→   478→        <div className="absolute inset-0">
+   479→   479→          <div
+   480→   480→            className="absolute inset-0"
+   481→   481→            style={{
+   482→   482→              background:
+   483→   483→                'radial-gradient(ellipse at 50% 0%, rgba(124, 58, 237, 0.06) 0%, transparent 50%)',
+   484→   484→            }}
+   485→   485→          />
+   486→   486→        </div>
+   487→   487→
+   488→   488→        {/* Glowing accent line at top */}
+   489→   489→        <div
+   490→   490→          className="absolute top-0 left-0 right-0 h-1"
+   491→   491→          style={{
+   492→   492→            background: 'linear-gradient(90deg, #7C3AED 0%, #8B5CF6 30%, #a78bfa 50%, #8B5CF6 70%, #7C3AED 100%)',
+   493→   493→          }}
+   494→   494→        />
+   495→   495→
+   496→   496→        <motion.div
+   497→   497→          className="w-full max-w-[400px] relative z-10"
+   498→   498→          initial={{ opacity: 0, x: 30 }}
+   499→   499→          animate={{ opacity: 1, x: 0 }}
+   500→   500→          transition={{ duration: 0.7, ease: 'easeOut' }}
+   501→   501→        >
+   502→   502→          {/* Mobile Logo */}
+   503→   503→          <motion.div
+   504→   504→            className="lg:hidden flex items-center justify-center mb-10"
+   505→   505→            initial={{ opacity: 0, scale: 0.9 }}
+   506→   506→            animate={{ opacity: 1, scale: 1 }}
+   507→   507→            transition={{ duration: 0.5 }}
+   508→   508→          >
+   509→   509→            <div className="relative w-20 h-20 rounded-2xl bg-white/[0.07] backdrop-blur-sm p-2 border border-blue-500/20 flex items-center justify-center">
+   510→   510→              <div className="absolute -inset-1 rounded-2xl bg-blue-500/10 blur-lg" />
+   511→   511→              <img src="/logo.png" alt="QRTags" className="w-full h-full object-contain relative z-10" />
+   512→   512→            </div>
+   513→   513→          </motion.div>
+   514→   514→
+   515→   515→          {/* Admin Badge */}
+   516→   516→          <motion.div className="flex items-center gap-2 mb-6" {...formChild} transition={{ delay: 0.1 }}>
+   517→   517→            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-600/20 text-blue-300 border border-blue-500/20">
+   518→   518→              <Shield className="w-3 h-3" />
+   519→   519→              Admin
+   520→   520→            </span>
+   521→   521→          </motion.div>
+   522→   522→
+   523→   523→          {/* Header */}
+   524→   524→          <motion.div className="mb-8" {...formChild} transition={{ delay: 0.2 }}>
+   525→   525→            <h1 className="text-3xl font-bold text-white tracking-tight mb-2">Administration</h1>
+   526→   526→            <p className="text-white/40 text-sm leading-relaxed">
+   527→   527→              Accès réservé aux administrateurs de la plateforme QRTags
+   528→   528→            </p>
+   529→   529→          </motion.div>
+   530→   530→
+   531→   531→          {/* Error Message */}
+   532→   532→          <AnimatePresence>
+   533→   533→            {error && (
+   534→   534→              <motion.div
+   535→   535→                initial={{ opacity: 0, y: -10, height: 0 }}
+   536→   536→                animate={{ opacity: 1, y: 0, height: 'auto' }}
+   537→   537→                exit={{ opacity: 0, y: -10, height: 0 }}
+   538→   538→                transition={{ duration: 0.3 }}
+   539→   539→                className="mb-6 overflow-hidden"
+   540→   540→              >
+   541→   541→                <div className="p-4 bg-red-950/40 border border-red-500/30 text-red-300 rounded-xl text-sm flex items-center gap-3">
+   542→   542→                  <div className="w-6 h-6 rounded-full bg-red-500/20 border border-red-500/40 flex items-center justify-center shrink-0">
+   543→   543→                    <span className="text-red-400 text-xs font-bold">!</span>
+   544→   544→                  </div>
+   545→   545→                  {error}
+   546→   546→                </div>
+   547→   547→              </motion.div>
+   548→   548→            )}
+   549→   549→          </AnimatePresence>
+   550→   550→
+   551→   551→          {/* Login Form */}
+   552→   552→          <form onSubmit={handleSubmit} className="space-y-5">
+   553→   553→            {/* Email Field */}
+   554→   554→            <motion.div {...formChild} transition={{ delay: 0.3 }}>
+   555→   555→              <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">
+   556→   556→                Email
+   557→   557→              </label>
+   558→   558→              <div
+   559→   559→                className={`relative flex items-center rounded-xl border transition-all duration-300 ${
+   560→   560→                  focusedField === 'email'
+   561→   561→                    ? 'border-blue-500 bg-[#059669] shadow-[0_0_0_4px_rgba(124,58,237,0.15),0_0_20px_rgba(124,58,237,0.1)]'
+   562→   562→                    : 'border-white/10 bg-[#059669]/80 hover:border-white/20'
+   563→   563→                }`}
+   564→   564→              >
+   565→   565→                <div
+   566→   566→                  className={`pl-4 transition-colors duration-200 ${
+   567→   567→                    focusedField === 'email' ? 'text-blue-400' : 'text-white/30'
+   568→   568→                  }`}
+   569→   569→                >
+   570→   570→                  <Mail className="w-[18px] h-[18px]" />
+   571→   571→                </div>
+   572→   572→                <input
+   573→   573→                  type="email"
+   574→   574→                  value={email}
+   575→   575→                  onChange={(e) => setEmail(e.target.value)}
+   576→   576→                  onFocus={() => setFocusedField('email')}
+   577→   577→                  onBlur={() => setFocusedField(null)}
+   578→   578→                  className="w-full bg-transparent border-none outline-none text-white placeholder-white/25 py-3.5 px-3 text-sm"
+   579→   579→                  placeholder="admin@qrtags.com"
+   580→   580→                  required
+   581→   581→                  autoComplete="email"
+   582→   582→                />
+   583→   583→                {/* Focus glow indicator */}
+   584→   584→                {focusedField === 'email' && (
+   585→   585→                  <motion.div
+   586→   586→                    className="absolute right-3 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-blue-400"
+   587→   587→                    layoutId="focus-dot"
+   588→   588→                    initial={{ opacity: 0 }}
+   589→   589→                    animate={{ opacity: 1 }}
+   590→   590→                    exit={{ opacity: 0 }}
+   591→   591→                  />
+   592→   592→                )}
+   593→   593→              </div>
+   594→   594→            </motion.div>
+   595→   595→
+   596→   596→            {/* Password Field */}
+   597→   597→            <motion.div {...formChild} transition={{ delay: 0.4 }}>
+   598→   598→              <label className="block text-xs font-semibold text-white/50 uppercase tracking-wider mb-2">
+   599→   599→                Mot de passe
+   600→   600→              </label>
+   601→   601→              <div
+   602→   602→                className={`relative flex items-center rounded-xl border transition-all duration-300 ${
+   603→   603→                  focusedField === 'password'
+   604→   604→                    ? 'border-blue-500 bg-[#059669] shadow-[0_0_0_4px_rgba(124,58,237,0.15),0_0_20px_rgba(124,58,237,0.1)]'
+   605→   605→                    : 'border-white/10 bg-[#059669]/80 hover:border-white/20'
+   606→   606→                }`}
+   607→   607→              >
+   608→   608→                <div
+   609→   609→                  className={`pl-4 transition-colors duration-200 ${
+   610→   610→                    focusedField === 'password' ? 'text-blue-400' : 'text-white/30'
+   611→   611→                  }`}
+   612→   612→                >
+   613→   613→                  <Lock className="w-[18px] h-[18px]" />
+   614→   614→                </div>
+   615→   615→                <input
+   616→   616→                  type={showPassword ? 'text' : 'password'}
+   617→   617→                  value={password}
+   618→   618→                  onChange={(e) => setPassword(e.target.value)}
+   619→   619→                  onFocus={() => setFocusedField('password')}
+   620→   620→                  onBlur={() => setFocusedField(null)}
+   621→   621→                  className="w-full bg-transparent border-none outline-none text-white placeholder-white/25 py-3.5 px-3 text-sm"
+   622→   622→                  placeholder="Entrez votre mot de passe"
+   623→   623→                  required
+   624→   624→                  autoComplete="current-password"
+   625→   625→                />
+   626→   626→                <button
+   627→   627→                  type="button"
+   628→   628→                  onClick={() => setShowPassword(!showPassword)}
+   629→   629→                  className="pr-4 text-white/30 hover:text-blue-400 transition-colors duration-200"
+   630→   630→                  tabIndex={-1}
+   631→   631→                  aria-label={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+   632→   632→                >
+   633→   633→                  {showPassword ? <EyeOff className="w-[18px] h-[18px]" /> : <Eye className="w-[18px] h-[18px]" />}
+   634→   634→                </button>
+   635→   635→                {focusedField === 'password' && (
+   636→   636→                  <motion.div
+   637→   637→                    className="absolute right-10 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-blue-400"
+   638→   638→                    layoutId="focus-dot"
+   639→   639→                    initial={{ opacity: 0 }}
+   640→   640→                    animate={{ opacity: 1 }}
+   641→   641→                    exit={{ opacity: 0 }}
+   642→   642→                  />
+   643→   643→                )}
+   644→   644→              </div>
+   645→   645→            </motion.div>
+   646→   646→
+   647→   647→            {/* Remember Me / Forgot Password */}
+   648→   648→            <motion.div
+   649→   649→              className="flex items-center justify-between"
+   650→   650→              {...formChild}
+   651→   651→              transition={{ delay: 0.5 }}
+   652→   652→            >
+   653→   653→              <label className="flex items-center cursor-pointer gap-2 group">
+   654→   654→                <input
+   655→   655→                  type="checkbox"
+   656→   656→                  checked={rememberMe}
+   657→   657→                  onChange={(e) => setRememberMe(e.target.checked)}
+   658→   658→                  className="w-4 h-4 rounded border-white/20 bg-white/5 text-blue-600 focus:ring-blue-500/30 focus:ring-offset-0 cursor-pointer accent-blue-600"
+   659→   659→                />
+   660→   660→                <span className="text-sm text-white/40 group-hover:text-white/60 transition-colors duration-200">
+   661→   661→                  Se souvenir de moi
+   662→   662→                </span>
+   663→   663→              </label>
+   664→   664→              <Link
+   665→   665→                href="/forgot-password"
+   666→   666→                className="text-sm font-medium text-blue-400 hover:text-blue-300 transition-colors duration-200"
+   667→   667→              >
+   668→   668→                Mot de passe oublié ?
+   669→   669→              </Link>
+   670→   670→            </motion.div>
+   671→   671→
+   672→   672→            {/* Submit Button */}
+   673→   673→            <motion.div {...formChild} transition={{ delay: 0.6 }}>
+   674→   674→              <button
+   675→   675→                type="submit"
+   676→   676→                disabled={loading}
+   677→   677→                className="w-full text-white font-semibold py-3.5 px-4 rounded-xl transition-all duration-300 disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2.5 text-sm bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 active:scale-[0.98] shadow-lg shadow-blue-600/30 hover:shadow-xl hover:shadow-blue-600/40 relative overflow-hidden group"
+   678→   678→              >
+   679→   679→                {/* Shimmer overlay */}
+   680→   680→                <div className="absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+   681→   681→                {loading ? (
+   682→   682→                  <>
+   683→   683→                    <Loader2 className="w-4 h-4 animate-spin" />
+   684→   684→                    Connexion en cours...
+   685→   685→                  </>
+   686→   686→                ) : (
+   687→   687→                  <>
+   688→   688→                    Se connecter
+   689→   689→                    <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+   690→   690→                  </>
+   691→   691→                )}
+   692→   692→              </button>
+   693→   693→            </motion.div>
+   694→   694→          </form>
+   695→   695→
+   696→   696→          {/* Demo Account Card */}
+   697→   697→          <motion.div
+   698→   698→            className="mt-6 p-4 rounded-xl bg-white/[0.04] border border-blue-500/15 backdrop-blur-sm"
+   699→   699→            initial={{ opacity: 0, y: 16 }}
+   700→   700→            animate={{ opacity: 1, y: 0 }}
+   701→   701→            transition={{ duration: 0.5, delay: 0.75 }}
+   702→   702→          >
+   703→   703→            <div className="flex items-center justify-between">
+   704→   704→              <div className="flex items-center gap-2.5">
+   705→   705→                <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/20 flex items-center justify-center">
+   706→   706→                  <Fingerprint className="w-4 h-4 text-blue-400" />
+   707→   707→                </div>
+   708→   708→                <div>
+   709→   709→                  <p className="text-xs font-semibold text-white/70">Compte démo</p>
+   710→   710→                  <p className="text-[10px] text-white/25 font-mono mt-0.5">
+   711→   711→                    admin@qrtags.com / admin123
+   712→   712→                  </p>
+   713→   713→                </div>
+   714→   714→              </div>
+   715→   715→              <button
+   716→   716→                type="button"
+   717→   717→                onClick={fillDemo}
+   718→   718→                className="text-xs font-semibold px-4 py-2 rounded-lg bg-blue-600/20 text-blue-300 border border-blue-500/20 hover:bg-blue-600/30 hover:text-blue-200 hover:border-blue-500/40 transition-all duration-200 active:scale-95"
+   719→   719→              >
+   720→   720→                Remplir
+   721→   721→              </button>
+   722→   722→            </div>
+   723→   723→          </motion.div>
+   724→   724→
+   725→   725→          {/* Switch to Agency */}
+   726→   726→          <motion.div
+   727→   727→            className="mt-8 text-center text-sm text-white/35"
+   728→   728→            initial={{ opacity: 0 }}
+   729→   729→            animate={{ opacity: 1 }}
+   730→   730→            transition={{ duration: 0.5, delay: 0.85 }}
+   731→   731→          >
+   732→   732→            Vous êtes une agence ?{' '}
+   733→   733→            <Link
+   734→   734→              href="/agence/connexion"
+   735→   735→              className="font-semibold text-blue-400 hover:text-blue-300 transition-colors duration-200"
+   736→   736→            >
+   737→   737→              Connexion Agence
+   738→   738→            </Link>
+   739→   739→          </motion.div>
+   740→   740→
+   741→   741→          {/* Bottom Links */}
+   742→   742→          <motion.div
+   743→   743→            className="mt-6 flex items-center justify-center gap-4 text-xs text-white/20"
+   744→   744→            initial={{ opacity: 0 }}
+   745→   745→            animate={{ opacity: 1 }}
+   746→   746→            transition={{ duration: 0.5, delay: 0.95 }}
+   747→   747→          >
+   748→   748→            <Link href="/cgu" className="hover:text-white/40 transition-colors duration-200">
+   749→   749→              CGU
+   750→   750→            </Link>
+   751→   751→            <span className="text-white/10">•</span>
+   752→   752→            <Link href="/confidentialite" className="hover:text-white/40 transition-colors duration-200">
+   753→   753→              Confidentialité
+   754→   754→            </Link>
+   755→   755→            <span className="text-white/10">•</span>
+   756→   756→            <Link href="/contact" className="hover:text-white/40 transition-colors duration-200">
+   757→   757→              Aide
+   758→   758→            </Link>
+   759→   759→          </motion.div>
+   760→   760→
+   761→   761→          {/* Security indicators at the very bottom */}
+   762→   762→          <motion.div
+   763→   763→            className="mt-10 flex items-center justify-center gap-4 text-[10px] text-white/15 uppercase tracking-widest"
+   764→   764→            initial={{ opacity: 0 }}
+   765→   765→            animate={{ opacity: 1 }}
+   766→   766→            transition={{ duration: 0.5, delay: 1.05 }}
+   767→   767→          >
+   768→   768→            <div className="flex items-center gap-1.5">
+   769→   769→              <Lock className="w-3 h-3" />
+   770→   770→              <span>Chiffré</span>
+   771→   771→            </div>
+   772→   772→            <div className="w-px h-3 bg-white/10" />
+   773→   773→            <div className="flex items-center gap-1.5">
+   774→   774→              <KeyRound className="w-3 h-3" />
+   775→   775→              <span>SSL</span>
+   776→   776→            </div>
+   777→   777→            <div className="w-px h-3 bg-white/10" />
+   778→   778→            <div className="flex items-center gap-1.5">
+   779→   779→              <Shield className="w-3 h-3" />
+   780→   780→              <span>RGPD</span>
+   781→   781→            </div>
+   782→   782→          </motion.div>
+   783→   783→        </motion.div>
+   784→   784→      </div>
+   785→   785→    </div>
+   786→   786→  );
+   787→   787→}
