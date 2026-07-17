@@ -1,0 +1,740 @@
+     1→/**
+     2→ * Shared database initialization utilities.
+     3→ * Used by /api/auth/init and /api/auth/login to ensure
+     4→ * the database is ready without self-fetching.
+     5→ */
+     6→
+     7→import { db } from '@/lib/db';
+     8→import bcrypt from 'bcryptjs';
+     9→
+    10→// ═══════════════════════════════════════════════════
+    11→// FULL TABLE CREATION SQL (SQLite)
+    12→// ═══════════════════════════════════════════════════
+    13→
+    14→const CREATE_TABLES_SQL = [
+    15→  // Independent tables first (no foreign keys)
+    16→  `CREATE TABLE IF NOT EXISTS "AgencyType" (
+    17→    "id" TEXT NOT NULL PRIMARY KEY,
+    18→    "name" TEXT NOT NULL UNIQUE,
+    19→    "label" TEXT NOT NULL,
+    20→    "icon" TEXT NOT NULL,
+    21→    "description" TEXT,
+    22→    "customFields" TEXT NOT NULL DEFAULT '[]',
+    23→    "color" TEXT NOT NULL DEFAULT '#2563EB',
+    24→    "isActive" BOOLEAN NOT NULL DEFAULT 1,
+    25→    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    26→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    27→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    28→  )`,
+    29→  `CREATE TABLE IF NOT EXISTS "Agency" (
+    30→    "id" TEXT NOT NULL PRIMARY KEY,
+    31→    "name" TEXT NOT NULL,
+    32→    "slug" TEXT NOT NULL UNIQUE,
+    33→    "agencyTypeId" TEXT NOT NULL,
+    34→    "email" TEXT,
+    35→    "phone" TEXT,
+    36→    "address" TEXT,
+    37→    "city" TEXT,
+    38→    "country" TEXT,
+    39→    "logoUrl" TEXT,
+    40→    "primaryColor" TEXT NOT NULL DEFAULT '#2563EB',
+    41→    "secondaryColor" TEXT NOT NULL DEFAULT '#F59E0B',
+    42→    "customMessage" TEXT,
+    43→    "contactEmail" TEXT,
+    44→    "contactPhone" TEXT,
+    45→    "active" BOOLEAN NOT NULL DEFAULT 1,
+    46→    "onboardingCompleted" BOOLEAN NOT NULL DEFAULT 0,
+    47→    "onboardingStep" INTEGER NOT NULL DEFAULT 0,
+    48→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    49→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    50→    FOREIGN KEY ("agencyTypeId") REFERENCES "AgencyType"("id")
+    51→  )`,
+    52→  `CREATE TABLE IF NOT EXISTS "User" (
+    53→    "id" TEXT NOT NULL PRIMARY KEY,
+    54→    "email" TEXT NOT NULL UNIQUE,
+    55→    "name" TEXT,
+    56→    "password" TEXT,
+    57→    "role" TEXT NOT NULL DEFAULT 'agency',
+    58→    "agencyId" TEXT,
+    59→    "staffRole" TEXT,
+    60→    "permissions" TEXT NOT NULL DEFAULT '[]',
+    61→    "isActive" BOOLEAN NOT NULL DEFAULT 1,
+    62→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    63→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    64→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id") ON DELETE CASCADE
+    65→  )`,
+    66→  `CREATE TABLE IF NOT EXISTS "Session" (
+    67→    "id" TEXT NOT NULL PRIMARY KEY,
+    68→    "userId" TEXT NOT NULL,
+    69→    "userAgent" TEXT,
+    70→    "ipAddress" TEXT,
+    71→    "lastActivity" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    72→    "expiresAt" DATETIME NOT NULL,
+    73→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    74→    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+    75→  )`,
+    76→  `CREATE TABLE IF NOT EXISTS "LoginLog" (
+    77→    "id" TEXT NOT NULL PRIMARY KEY,
+    78→    "userId" TEXT,
+    79→    "email" TEXT NOT NULL,
+    80→    "success" BOOLEAN NOT NULL DEFAULT 0,
+    81→    "failureReason" TEXT,
+    82→    "ipAddress" TEXT,
+    83→    "userAgent" TEXT,
+    84→    "country" TEXT,
+    85→    "city" TEXT,
+    86→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    87→    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL
+    88→  )`,
+    89→  `CREATE TABLE IF NOT EXISTS "Tag" (
+    90→    "id" TEXT NOT NULL PRIMARY KEY,
+    91→    "serialNumber" TEXT NOT NULL UNIQUE,
+    92→    "qrCodeUrl" TEXT,
+    93→    "tagType" TEXT NOT NULL DEFAULT 'standard',
+    94→    "agencyId" TEXT,
+    95→    "endUserId" TEXT,
+    96→    "status" TEXT NOT NULL DEFAULT 'created',
+    97→    "customData" TEXT NOT NULL DEFAULT '{}',
+    98→    "ownerName" TEXT,
+    99→    "ownerPhone" TEXT,
+   100→    "ownerEmail" TEXT,
+   101→    "itemName" TEXT,
+   102→    "itemDescription" TEXT,
+   103→    "itemCategory" TEXT,
+   104→    "locationBuilding" TEXT,
+   105→    "locationRoom" TEXT,
+   106→    "locationNote" TEXT,
+   107→    "activatedAt" DATETIME,
+   108→    "expiresAt" DATETIME,
+   109→    "lastScanDate" DATETIME,
+   110→    "lastLocation" TEXT,
+   111→    "declaredLostAt" DATETIME,
+   112→    "foundAt" DATETIME,
+   113→    "founderName" TEXT,
+   114→    "founderPhone" TEXT,
+   115→    "founderEmail" TEXT,
+   116→    "founderMessage" TEXT,
+   117→    "founderAt" DATETIME,
+   118→    "setId" TEXT,
+   119→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   120→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   121→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id") ON DELETE SET NULL
+   122→  )`,
+   123→  `CREATE TABLE IF NOT EXISTS "ScanLog" (
+   124→    "id" TEXT NOT NULL PRIMARY KEY,
+   125→    "tagId" TEXT NOT NULL,
+   126→    "scannedBy" TEXT,
+   127→    "scannerId" TEXT,
+   128→    "scanType" TEXT NOT NULL DEFAULT 'finder',
+   129→    "ipAddress" TEXT,
+   130→    "country" TEXT,
+   131→    "city" TEXT,
+   132→    "latitude" REAL,
+   133→    "longitude" REAL,
+   134→    "location" TEXT,
+   135→    "notes" TEXT,
+   136→    "whatsappStatus" TEXT,
+   137→    "aiAnalysis" TEXT,
+   138→    "groqUsed" BOOLEAN NOT NULL DEFAULT 0,
+   139→    "groqLatencyMs" INTEGER,
+   140→    "groqModelUsed" TEXT,
+   141→    "wakitMessageId" TEXT,
+   142→    "context" TEXT,
+   143→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   144→    FOREIGN KEY ("tagId") REFERENCES "Tag"("id") ON DELETE CASCADE
+   145→  )`,
+   146→  `CREATE TABLE IF NOT EXISTS "Setting" (
+   147→    "id" TEXT NOT NULL PRIMARY KEY,
+   148→    "key" TEXT NOT NULL UNIQUE,
+   149→    "value" TEXT NOT NULL,
+   150→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   151→  )`,
+   152→  `CREATE TABLE IF NOT EXISTS "FeatureFlag" (
+   153→    "id" TEXT NOT NULL PRIMARY KEY,
+   154→    "key" TEXT NOT NULL UNIQUE,
+   155→    "label" TEXT NOT NULL,
+   156→    "description" TEXT NOT NULL,
+   157→    "category" TEXT NOT NULL DEFAULT 'general',
+   158→    "enabled" BOOLEAN NOT NULL DEFAULT 0,
+   159→    "icon" TEXT,
+   160→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   161→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   162→  )`,
+   163→  `CREATE TABLE IF NOT EXISTS "Subscription" (
+   164→    "id" TEXT NOT NULL PRIMARY KEY,
+   165→    "agencyId" TEXT NOT NULL UNIQUE,
+   166→    "plan" TEXT NOT NULL DEFAULT 'starter',
+   167→    "status" TEXT NOT NULL DEFAULT 'trial',
+   168→    "startDate" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   169→    "endDate" DATETIME,
+   170→    "trialEndsAt" DATETIME,
+   171→    "maxTags" INTEGER NOT NULL DEFAULT 50,
+   172→    "maxUsers" INTEGER NOT NULL DEFAULT 5,
+   173→    "maxScans" INTEGER NOT NULL DEFAULT 1000,
+   174→    "amount" REAL NOT NULL DEFAULT 0,
+   175→    "currency" TEXT NOT NULL DEFAULT 'XOF',
+   176→    "billingCycle" TEXT NOT NULL DEFAULT 'monthly',
+   177→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   178→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   179→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id") ON DELETE CASCADE
+   180→  )`,
+   181→  `CREATE TABLE IF NOT EXISTS "Payment" (
+   182→    "id" TEXT NOT NULL PRIMARY KEY,
+   183→    "agencyId" TEXT NOT NULL,
+   184→    "subscriptionId" TEXT,
+   185→    "amount" REAL NOT NULL,
+   186→    "currency" TEXT NOT NULL DEFAULT 'XOF',
+   187→    "method" TEXT NOT NULL,
+   188→    "status" TEXT NOT NULL DEFAULT 'pending',
+   189→    "transactionId" TEXT,
+   190→    "phoneNumber" TEXT,
+   191→    "description" TEXT,
+   192→    "paidAt" DATETIME,
+   193→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   194→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   195→    FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id")
+   196→  )`,
+   197→  `CREATE TABLE IF NOT EXISTS "Wallet" (
+   198→    "id" TEXT NOT NULL PRIMARY KEY,
+   199→    "agencyId" TEXT NOT NULL UNIQUE,
+   200→    "balance" REAL NOT NULL DEFAULT 0,
+   201→    "totalEarned" REAL NOT NULL DEFAULT 0,
+   202→    "totalWithdrawn" REAL NOT NULL DEFAULT 0,
+   203→    "currency" TEXT NOT NULL DEFAULT 'XOF',
+   204→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   205→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   206→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id") ON DELETE CASCADE
+   207→  )`,
+   208→  `CREATE TABLE IF NOT EXISTS "Message" (
+   209→    "id" TEXT NOT NULL PRIMARY KEY,
+   210→    "type" TEXT NOT NULL,
+   211→    "status" TEXT NOT NULL DEFAULT 'non_lu',
+   212→    "senderName" TEXT,
+   213→    "senderEmail" TEXT,
+   214→    "senderPhone" TEXT,
+   215→    "agencyId" TEXT,
+   216→    "recipientAgencyId" TEXT,
+   217→    "subject" TEXT,
+   218→    "content" TEXT NOT NULL,
+   219→    "tagId" TEXT,
+   220→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   221→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   222→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id")
+   223→  )`,
+   224→  `CREATE TABLE IF NOT EXISTS "Notification" (
+   225→    "id" TEXT NOT NULL PRIMARY KEY,
+   226→    "type" TEXT NOT NULL,
+   227→    "userId" TEXT,
+   228→    "agencyId" TEXT,
+   229→    "tagId" TEXT,
+   230→    "message" TEXT NOT NULL,
+   231→    "data" TEXT,
+   232→    "read" BOOLEAN NOT NULL DEFAULT 0,
+   233→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   234→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   235→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id")
+   236→  )`,
+   237→  `CREATE TABLE IF NOT EXISTS "Booking" (
+   238→    "id" TEXT NOT NULL PRIMARY KEY,
+   239→    "tagId" TEXT NOT NULL,
+   240→    "agencyId" TEXT NOT NULL,
+   241→    "customData" TEXT NOT NULL DEFAULT '{}',
+   242→    "status" TEXT NOT NULL DEFAULT 'active',
+   243→    "activatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   244→    "completedAt" DATETIME,
+   245→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   246→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   247→    FOREIGN KEY ("tagId") REFERENCES "Tag"("id") ON DELETE CASCADE,
+   248→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id")
+   249→  )`,
+   250→  `CREATE TABLE IF NOT EXISTS "SystemLog" (
+   251→    "id" TEXT NOT NULL PRIMARY KEY,
+   252→    "level" TEXT NOT NULL,
+   253→    "message" TEXT NOT NULL,
+   254→    "source" TEXT NOT NULL,
+   255→    "metadata" TEXT,
+   256→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   257→  )`,
+   258→  `CREATE TABLE IF NOT EXISTS "WalletTransaction" (
+   259→    "id" TEXT NOT NULL PRIMARY KEY,
+   260→    "walletId" TEXT NOT NULL,
+   261→    "agencyId" TEXT NOT NULL,
+   262→    "transactionType" TEXT NOT NULL,
+   263→    "amount" REAL NOT NULL,
+   264→    "description" TEXT NOT NULL,
+   265→    "status" TEXT NOT NULL DEFAULT 'completed',
+   266→    "referenceId" TEXT,
+   267→    "referenceType" TEXT,
+   268→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   269→    FOREIGN KEY ("walletId") REFERENCES "Wallet"("id") ON DELETE CASCADE
+   270→  )`,
+   271→  `CREATE TABLE IF NOT EXISTS "Invoice" (
+   272→    "id" TEXT NOT NULL PRIMARY KEY,
+   273→    "number" TEXT NOT NULL UNIQUE,
+   274→    "agencyId" TEXT NOT NULL,
+   275→    "subscriptionId" TEXT,
+   276→    "amount" REAL NOT NULL,
+   277→    "currency" TEXT NOT NULL DEFAULT 'XOF',
+   278→    "status" TEXT NOT NULL DEFAULT 'pending',
+   279→    "description" TEXT,
+   280→    "items" TEXT NOT NULL,
+   281→    "dueDate" DATETIME,
+   282→    "paidAt" DATETIME,
+   283→    "paymentMethod" TEXT,
+   284→    "pdfUrl" TEXT,
+   285→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   286→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   287→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id"),
+   288→    FOREIGN KEY ("subscriptionId") REFERENCES "Subscription"("id")
+   289→  )`,
+   290→  `CREATE TABLE IF NOT EXISTS "EmailSettings" (
+   291→    "id" TEXT NOT NULL PRIMARY KEY,
+   292→    "provider" TEXT NOT NULL DEFAULT 'console',
+   293→    "fromEmail" TEXT NOT NULL DEFAULT 'noreply@qrtags.com',
+   294→    "fromName" TEXT NOT NULL DEFAULT 'QRTags',
+   295→    "recipientEmail" TEXT,
+   296→    "smtpHost" TEXT,
+   297→    "smtpPort" INTEGER,
+   298→    "smtpUser" TEXT,
+   299→    "smtpPassword" TEXT,
+   300→    "smtpEncryption" TEXT NOT NULL DEFAULT 'tls',
+   301→    "isActive" BOOLEAN NOT NULL DEFAULT 1,
+   302→    "lastTestAt" DATETIME,
+   303→    "lastTestStatus" TEXT,
+   304→    "lastTestError" TEXT,
+   305→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   306→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   307→  )`,
+   308→  `CREATE TABLE IF NOT EXISTS "EmailLog" (
+   309→    "id" TEXT NOT NULL PRIMARY KEY,
+   310→    "to" TEXT NOT NULL,
+   311→    "subject" TEXT NOT NULL,
+   312→    "type" TEXT NOT NULL,
+   313→    "status" TEXT NOT NULL DEFAULT 'pending',
+   314→    "error" TEXT,
+   315→    "userId" TEXT,
+   316→    "agencyId" TEXT,
+   317→    "data" TEXT,
+   318→    "sentAt" DATETIME,
+   319→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   320→  )`,
+   321→  `CREATE TABLE IF NOT EXISTS "EmailToken" (
+   322→    "id" TEXT NOT NULL PRIMARY KEY,
+   323→    "email" TEXT NOT NULL,
+   324→    "token" TEXT NOT NULL UNIQUE,
+   325→    "type" TEXT NOT NULL,
+   326→    "code" TEXT,
+   327→    "expiresAt" DATETIME NOT NULL,
+   328→    "used" BOOLEAN NOT NULL DEFAULT 0,
+   329→    "usedAt" DATETIME,
+   330→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   331→  )`,
+   332→  `CREATE TABLE IF NOT EXISTS "Lead" (
+   333→    "id" TEXT NOT NULL PRIMARY KEY,
+   334→    "name" TEXT NOT NULL,
+   335→    "email" TEXT NOT NULL,
+   336→    "phone" TEXT,
+   337→    "company" TEXT,
+   338→    "agencyTypeId" TEXT,
+   339→    "status" TEXT NOT NULL DEFAULT 'new',
+   340→    "source" TEXT,
+   341→    "notes" TEXT,
+   342→    "agencyId" TEXT,
+   343→    "assignedToId" TEXT,
+   344→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   345→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   346→    FOREIGN KEY ("assignedToId") REFERENCES "User"("id") ON DELETE SET NULL
+   347→  )`,
+   348→  `CREATE TABLE IF NOT EXISTS "Observation" (
+   349→    "id" TEXT NOT NULL PRIMARY KEY,
+   350→    "leadId" TEXT NOT NULL,
+   351→    "type" TEXT NOT NULL,
+   352→    "content" TEXT NOT NULL,
+   353→    "date" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   354→    "userId" TEXT NOT NULL,
+   355→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   356→    FOREIGN KEY ("leadId") REFERENCES "Lead"("id") ON DELETE CASCADE,
+   357→    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+   358→  )`,
+   359→  `CREATE TABLE IF NOT EXISTS "DailyReport" (
+   360→    "id" TEXT NOT NULL PRIMARY KEY,
+   361→    "userId" TEXT NOT NULL,
+   362→    "date" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   363→    "content" TEXT NOT NULL,
+   364→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   365→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   366→    FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE,
+   367→    UNIQUE("userId", "date")
+   368→  )`,
+   369→  `CREATE TABLE IF NOT EXISTS "Advertisement" (
+   370→    "id" TEXT NOT NULL PRIMARY KEY,
+   371→    "title" TEXT NOT NULL,
+   372→    "description" TEXT,
+   373→    "imageUrl" TEXT NOT NULL,
+   374→    "linkUrl" TEXT,
+   375→    "linkTarget" TEXT NOT NULL DEFAULT '_blank',
+   376→    "position" TEXT NOT NULL DEFAULT 'footer',
+   377→    "targetScope" TEXT NOT NULL DEFAULT 'all',
+   378→    "agencyId" TEXT,
+   379→    "agencyTypeId" TEXT,
+   380→    "startDate" DATETIME NOT NULL,
+   381→    "endDate" DATETIME,
+   382→    "status" TEXT NOT NULL DEFAULT 'draft',
+   383→    "priority" INTEGER NOT NULL DEFAULT 0,
+   384→    "impressions" INTEGER NOT NULL DEFAULT 0,
+   385→    "clicks" INTEGER NOT NULL DEFAULT 0,
+   386→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   387→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   388→    FOREIGN KEY ("agencyId") REFERENCES "Agency"("id")
+   389→  )`,
+   390→  `CREATE TABLE IF NOT EXISTS "AdImpression" (
+   391→    "id" TEXT NOT NULL PRIMARY KEY,
+   392→    "advertisementId" TEXT NOT NULL,
+   393→    "userId" TEXT,
+   394→    "agencyId" TEXT,
+   395→    "userRole" TEXT,
+   396→    "action" TEXT NOT NULL,
+   397→    "ipAddress" TEXT,
+   398→    "userAgent" TEXT,
+   399→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   400→    FOREIGN KEY ("advertisementId") REFERENCES "Advertisement"("id") ON DELETE CASCADE
+   401→  )`,
+   402→  `CREATE TABLE IF NOT EXISTS "BlogPost" (
+   403→    "id" TEXT NOT NULL PRIMARY KEY,
+   404→    "title" TEXT NOT NULL,
+   405→    "slug" TEXT NOT NULL UNIQUE,
+   406→    "content" TEXT NOT NULL,
+   407→    "excerpt" TEXT,
+   408→    "coverImage" TEXT,
+   409→    "category" TEXT NOT NULL DEFAULT 'actualites',
+   410→    "status" TEXT NOT NULL DEFAULT 'draft',
+   411→    "publishedAt" DATETIME,
+   412→    "authorId" TEXT,
+   413→    "views" INTEGER NOT NULL DEFAULT 0,
+   414→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   415→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   416→    FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE SET NULL
+   417→  )`,
+   418→  `CREATE TABLE IF NOT EXISTS "BlogView" (
+   419→    "id" TEXT NOT NULL PRIMARY KEY,
+   420→    "postId" TEXT NOT NULL,
+   421→    "userId" TEXT,
+   422→    "agencyId" TEXT,
+   423→    "ipAddress" TEXT,
+   424→    "userAgent" TEXT,
+   425→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   426→    FOREIGN KEY ("postId") REFERENCES "BlogPost"("id") ON DELETE CASCADE
+   427→  )`,
+   428→  `CREATE TABLE IF NOT EXISTS "Page" (
+   429→    "id" TEXT NOT NULL PRIMARY KEY,
+   430→    "slug" TEXT NOT NULL UNIQUE,
+   431→    "title" TEXT NOT NULL,
+   432→    "content" TEXT NOT NULL,
+   433→    "published" BOOLEAN NOT NULL DEFAULT 0,
+   434→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   435→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   436→  )`,
+   437→  `CREATE TABLE IF NOT EXISTS "Banner" (
+   438→    "id" TEXT NOT NULL PRIMARY KEY,
+   439→    "type" TEXT NOT NULL,
+   440→    "content" TEXT NOT NULL,
+   441→    "active" BOOLEAN NOT NULL DEFAULT 1,
+   442→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   443→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   444→  )`,
+   445→  `CREATE TABLE IF NOT EXISTS "LossAlert" (
+   446→    "id" TEXT NOT NULL PRIMARY KEY,
+   447→    "tagId" TEXT NOT NULL,
+   448→    "reference" TEXT NOT NULL,
+   449→    "alertType" TEXT NOT NULL DEFAULT 'no_scan_after_activation',
+   450→    "message" TEXT NOT NULL,
+   451→    "dismissed" BOOLEAN NOT NULL DEFAULT 0,
+   452→    "dismissedAt" DATETIME,
+   453→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   454→  )`,
+   455→  `CREATE TABLE IF NOT EXISTS "Checklist" (
+   456→    "id" TEXT NOT NULL PRIMARY KEY,
+   457→    "code" TEXT NOT NULL UNIQUE,
+   458→    "verificationKey" TEXT NOT NULL,
+   459→    "firstName" TEXT NOT NULL,
+   460→    "lastName" TEXT NOT NULL,
+   461→    "email" TEXT NOT NULL,
+   462→    "departureDate" TEXT NOT NULL,
+   463→    "destinationCountry" TEXT NOT NULL,
+   464→    "items" TEXT NOT NULL,
+   465→    "itemsCount" INTEGER NOT NULL DEFAULT 0,
+   466→    "photoPath" TEXT,
+   467→    "photoSizeBytes" INTEGER NOT NULL DEFAULT 0,
+   468→    "pdfPath" TEXT,
+   469→    "pdfSizeBytes" INTEGER NOT NULL DEFAULT 0,
+   470→    "viewCount" INTEGER NOT NULL DEFAULT 0,
+   471→    "lastViewedAt" DATETIME,
+   472→    "emailSent" BOOLEAN NOT NULL DEFAULT 0,
+   473→    "emailSentAt" DATETIME,
+   474→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   475→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   476→  )`,
+   477→  `CREATE TABLE IF NOT EXISTS "Review" (
+   478→    "id" TEXT NOT NULL PRIMARY KEY,
+   479→    "name" TEXT NOT NULL,
+   480→    "location" TEXT,
+   481→    "rating" INTEGER NOT NULL,
+   482→    "title" TEXT,
+   483→    "content" TEXT NOT NULL,
+   484→    "tagRef" TEXT,
+   485→    "isFeatured" BOOLEAN NOT NULL DEFAULT 0,
+   486→    "isApproved" BOOLEAN NOT NULL DEFAULT 0,
+   487→    "response" TEXT,
+   488→    "language" TEXT NOT NULL DEFAULT 'fr',
+   489→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   490→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   491→  )`,
+   492→  `CREATE TABLE IF NOT EXISTS "SMSCredits" (
+   493→    "id" TEXT NOT NULL PRIMARY KEY,
+   494→    "agencyId" TEXT NOT NULL UNIQUE,
+   495→    "balance" INTEGER NOT NULL DEFAULT 0,
+   496→    "totalPurchased" INTEGER NOT NULL DEFAULT 0,
+   497→    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+   498→    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+   499→  )`,
+   500→];
+   501→
+   502→// Track if init has been run this process (avoid re-running on every request)
+   503→let _initDone = false;
+   504→let _initPromise: Promise<void> | null = null;
+   505→
+   506→/**
+   507→ * Ensure all required database tables exist.
+   508→ * Creates tables using raw SQL if they don't exist.
+   509→ */
+   510→export async function ensureTablesExist(): Promise<{ created: string[]; errors: string[] }> {
+   511→  const created: string[] = [];
+   512→  const errors: string[] = [];
+   513→
+   514→  for (const sql of CREATE_TABLES_SQL) {
+   515→    const tableNameMatch = sql.match(/CREATE TABLE IF NOT EXISTS "(\w+)"/);
+   516→    const tableName = tableNameMatch ? tableNameMatch[1] : 'unknown';
+   517→
+   518→    try {
+   519→      await db.$executeRawUnsafe(sql);
+   520→      created.push(tableName);
+   521→    } catch (err) {
+   522→      const msg = err instanceof Error ? err.message : String(err);
+   523→      errors.push(`${tableName}: ${msg}`);
+   524→      console.error(`[db-init] ✗ Failed to create table ${tableName}:`, msg);
+   525→    }
+   526→  }
+   527→
+   528→  return { created, errors };
+   529→}
+   530→
+   531→const ADMIN_PERMISSIONS = [
+   532→  'VIEW_DASHBOARD', 'MANAGE_TAGS', 'MANAGE_AGENCIES', 'MANAGE_USERS',
+   533→  'MANAGE_AGENCY_TYPES', 'MANAGE_SUBSCRIPTIONS', 'MANAGE_PAYMENTS',
+   534→  'MANAGE_SETTINGS', 'MANAGE_FEATURES', 'VIEW_WALLET', 'MANAGE_STAFF',
+   535→  'MANAGE_WHITE_LABEL', 'MANAGE_MESSAGES', 'MANAGE_BLOG',
+   536→  'MANAGE_ADVERTISEMENTS', 'MANAGE_CRM', 'VIEW_REPORTS',
+   537→  'MANAGE_BACKUP', 'MANAGE_SECURITY',
+   538→];
+   539→
+   540→/**
+   541→ * Ensure the superadmin user exists and has the correct password.
+   542→ * This function ALSO resets the password if it doesn't match the expected default.
+   543→ * This is critical because in Docker, previous failed creates may have left
+   544→ * a user with a wrong or null password.
+   545→ */
+   546→export async function ensureAdminUser(): Promise<{ created: boolean; reset: boolean; email: string; error?: string }> {
+   547→  const adminEmail = (process.env.ADMIN_EMAIL || 'admin@qrtags.com').toLowerCase();
+   548→  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+   549→  const adminName = process.env.ADMIN_NAME || 'Super Admin QRTags';
+   550→
+   551→  // Check if admin exists and verify password
+   552→  try {
+   553→    const existing = await db.user.findUnique({
+   554→      where: { email: adminEmail },
+   555→      select: { id: true, password: true, role: true },
+   556→    });
+   557→
+   558→    if (existing) {
+   559→      // Admin exists - verify password matches
+   560→      if (existing.password) {
+   561→        const passwordMatches = await bcrypt.compare(adminPassword, existing.password);
+   562→        if (passwordMatches) {
+   563→          return { created: false, reset: false, email: adminEmail };
+   564→        }
+   565→        // Password doesn't match - reset it!
+   566→        console.log(`[db-init] Admin password mismatch, resetting...`);
+   567→        const newHash = await bcrypt.hash(adminPassword, 12);
+   568→        try {
+   569→          await db.user.update({
+   570→            where: { id: existing.id },
+   571→            data: { password: newHash, role: 'superadmin', isActive: true },
+   572→          });
+   573→          console.log(`[db-init] ✓ Admin password reset: ${adminEmail}`);
+   574→          return { created: false, reset: true, email: adminEmail };
+   575→        } catch {
+   576→          // Try raw SQL update
+   577→          try {
+   578→            await db.$executeRawUnsafe(
+   579→              `UPDATE User SET password = ?, role = 'superadmin', isActive = 1 WHERE id = ?`,
+   580→              newHash, existing.id
+   581→            );
+   582→            console.log(`[db-init] ✓ Admin password reset (raw SQL): ${adminEmail}`);
+   583→            return { created: false, reset: true, email: adminEmail };
+   584→          } catch (rawErr) {
+   585→            console.error(`[db-init] ✗ Password reset failed:`, rawErr);
+   586→          }
+   587→        }
+   588→      } else {
+   589→        // Password is null - set it
+   590→        const newHash = await bcrypt.hash(adminPassword, 12);
+   591→        try {
+   592→          await db.user.update({
+   593→            where: { id: existing.id },
+   594→            data: { password: newHash, role: 'superadmin', isActive: true },
+   595→          });
+   596→          console.log(`[db-init] ✓ Admin password set (was null): ${adminEmail}`);
+   597→          return { created: false, reset: true, email: adminEmail };
+   598→        } catch {
+   599→          try {
+   600→            await db.$executeRawUnsafe(
+   601→              `UPDATE User SET password = ?, role = 'superadmin', isActive = 1 WHERE id = ?`,
+   602→              newHash, existing.id
+   603→            );
+   604→            return { created: false, reset: true, email: adminEmail };
+   605→          } catch { /* ignore */ }
+   606→        }
+   607→      }
+   608→      return { created: false, reset: false, email: adminEmail };
+   609→    }
+   610→  } catch {
+   611→    console.log('[db-init] Prisma check failed, trying raw SQL...');
+   612→  }
+   613→
+   614→  // Check via raw SQL
+   615→  try {
+   616→    const rawResult = await db.$queryRawUnsafe(
+   617→      `SELECT id, password FROM User WHERE email = ? LIMIT 1`,
+   618→      adminEmail
+   619→    ) as Array<{ id: string; password: string | null }>;
+   620→
+   621→    if (rawResult.length > 0) {
+   622→      const existingUser = rawResult[0];
+   623→      // Verify/set password
+   624→      if (existingUser.password) {
+   625→        const passwordMatches = await bcrypt.compare(adminPassword, existingUser.password);
+   626→        if (passwordMatches) {
+   627→          return { created: false, reset: false, email: adminEmail };
+   628→        }
+   629→      }
+   630→      // Reset password
+   631→      const newHash = await bcrypt.hash(adminPassword, 12);
+   632→      try {
+   633→        await db.$executeRawUnsafe(
+   634→          `UPDATE User SET password = ?, role = 'superadmin', isActive = 1 WHERE id = ?`,
+   635→          newHash, existingUser.id
+   636→        );
+   637→        console.log(`[db-init] ✓ Admin password reset (raw): ${adminEmail}`);
+   638→        return { created: false, reset: true, email: adminEmail };
+   639→      } catch { /* ignore */ }
+   640→      return { created: false, reset: false, email: adminEmail };
+   641→    }
+   642→  } catch {
+   643→    console.log('[db-init] Raw SQL check failed, creating admin...');
+   644→  }
+   645→
+   646→  // Create admin user
+   647→  const hashedPassword = await bcrypt.hash(adminPassword, 12);
+   648→
+   649→  // Try Prisma ORM create
+   650→  try {
+   651→    await db.user.create({
+   652→      data: {
+   653→        email: adminEmail,
+   654→        name: adminName,
+   655→        password: hashedPassword,
+   656→        role: 'superadmin',
+   657→        permissions: JSON.stringify(ADMIN_PERMISSIONS),
+   658→        isActive: true,
+   659→      },
+   660→    });
+   661→    console.log(`[db-init] ✓ SuperAdmin created via Prisma: ${adminEmail}`);
+   662→    return { created: true, reset: false, email: adminEmail };
+   663→  } catch (prismaErr) {
+   664→    console.error('[db-init] Prisma create failed:', prismaErr instanceof Error ? prismaErr.message : String(prismaErr));
+   665→  }
+   666→
+   667→  // Fallback: raw SQL create
+   668→  const id = `cm_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+   669→  const now = new Date().toISOString();
+   670→  try {
+   671→    await db.$executeRawUnsafe(
+   672→      `INSERT INTO User (id, email, name, password, role, permissions, isActive, createdAt, updatedAt)
+   673→       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+   674→      id, adminEmail, adminName, hashedPassword, 'superadmin',
+   675→      JSON.stringify(ADMIN_PERMISSIONS),
+   676→      now, now
+   677→    );
+   678→    console.log(`[db-init] ✓ SuperAdmin created via raw SQL: ${adminEmail}`);
+   679→    return { created: true, reset: false, email: adminEmail };
+   680→  } catch (rawErr) {
+   681→    const errMsg = rawErr instanceof Error ? rawErr.message : String(rawErr);
+   682→    console.error('[db-init] ✗ Raw SQL create also failed:', errMsg);
+   683→    return { created: false, reset: false, email: adminEmail, error: errMsg };
+   684→  }
+   685→}
+   686→
+   687→/**
+   688→ * Full database initialization: ensure tables → ensure admin user.
+   689→ * This is the main function to call from any API route.
+   690→ * Runs only once per process (subsequent calls are no-ops).
+   691→ */
+   692→export async function initializeDatabase(): Promise<{
+   693→  tables: { created: string[]; errors: string[] };
+   694→  admin: { created: boolean; reset: boolean; email: string; error?: string };
+   695→}> {
+   696→  // If already initialized this process, skip
+   697→  if (_initDone) {
+   698→    return {
+   699→      tables: { created: [], errors: [] },
+   700→      admin: { created: false, reset: false, email: '' },
+   701→    };
+   702→  }
+   703→
+   704→  // If init is currently running, wait for it
+   705→  if (_initPromise) {
+   706→    await _initPromise;
+   707→    return {
+   708→      tables: { created: [], errors: [] },
+   709→      admin: { created: false, reset: false, email: '' },
+   710→    };
+   711→  }
+   712→
+   713→  // Run initialization
+   714→  _initPromise = (async () => {
+   715→    console.log('[db-init] ═══ Starting database initialization ═══');
+   716→
+   717→    // Step 1: Ensure tables exist
+   718→    const tablesResult = await ensureTablesExist();
+   719→    console.log(`[db-init] Tables: ${tablesResult.created.length} OK, ${tablesResult.errors.length} errors`);
+   720→
+   721→    // Step 2: Ensure admin user exists with correct password
+   722→    const adminResult = await ensureAdminUser();
+   723→
+   724→    console.log('[db-init] ═══ Initialization complete ═══');
+   725→    _initDone = true;
+   726→
+   727→    return { tables: tablesResult, admin: adminResult };
+   728→  })();
+   729→
+   730→  return _initPromise;
+   731→}
+   732→
+   733→/**
+   734→ * Force re-initialization (used by /api/auth/init endpoint).
+   735→ */
+   736→export function resetInitFlag() {
+   737→  _initDone = false;
+   738→  _initPromise = null;
+   739→}
+   740→
