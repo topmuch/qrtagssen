@@ -8,7 +8,7 @@ const userSchema = z.object({
   email: z.string().email(),
   name: z.string().optional(),
   password: z.string().min(6),
-  role: z.enum(['superadmin', 'admin', 'agent', 'agency']),
+  role: z.enum(['superadmin', 'admin', 'staff', 'agent', 'agency']),
   agencyId: z.string().optional(),
   staffRole: z.string().optional(),
   permissions: z.array(z.string()).optional(),

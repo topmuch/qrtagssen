@@ -107,19 +107,38 @@ export default function AgencesPage() {
     secondaryColor: '#F59E0B',
   });
 
+  const [agencyTypes, setAgencyTypes] = useState<Array<{id:string; name:string; label:string; color:string}>>([]);
+
   const [agencyForm, setAgencyForm] = useState({
     name: '',
     slug: '',
     email: '',
     phone: '',
-    agencyTypeId: 'hotel',
+    agencyTypeId: '',
     password: '',
     confirmPassword: '',
   });
 
   useEffect(() => {
     fetchAgencies();
+    fetchAgencyTypes();
   }, []);
+
+  const fetchAgencyTypes = async () => {
+    try {
+      const res = await fetch('/api/admin/agency-types');
+      if (res.ok) {
+        const data = await res.json();
+        setAgencyTypes(data.types || []);
+        // Auto-select first type if none selected
+        if (data.types?.length > 0 && !agencyForm.agencyTypeId) {
+          setAgencyForm(prev => ({ ...prev, agencyTypeId: data.types[0].id }));
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching agency types:', error);
+    }
+  };
 
   const fetchAgencies = async () => {
     setLoading(true);
@@ -151,22 +170,29 @@ export default function AgencesPage() {
     setAgencyCreating(true);
     setErrorMessage('');
 
+    // Auto-generate slug from name if empty
+    const slug = agencyForm.slug || agencyForm.name
+      .toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
+
     try {
       const agencyResponse = await fetch('/api/admin/agencies', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: agencyForm.name,
-          slug: agencyForm.slug,
+          slug,
           email: agencyForm.email,
           phone: agencyForm.phone,
           agencyTypeId: agencyForm.agencyTypeId,
         }),
       });
 
-      if (agencyResponse.ok) {
-        const agencyData = await agencyResponse.json();
+      const agencyData = await agencyResponse.json();
 
+      if (agencyResponse.ok) {
         // Create agency user
         const userResponse = await fetch('/api/admin/users', {
           method: 'POST',
@@ -181,16 +207,17 @@ export default function AgencesPage() {
         });
 
         if (userResponse.ok) {
-          setSuccessMessage('Agence créée avec succès !');
-          setAgencyForm({ name: '', slug: '', email: '', phone: '', agencyTypeId: 'hotel', password: '', confirmPassword: '' });
+          setSuccessMessage('Agence et utilisateur créés avec succès !');
+          setAgencyForm({ name: '', slug: '', email: '', phone: '', agencyTypeId: agencyTypes[0]?.id || '', password: '', confirmPassword: '' });
           setDialogOpen(false);
           fetchAgencies();
         } else {
-          setErrorMessage('Agence créée mais erreur lors de la création de l\'utilisateur');
+          const errData = await userResponse.json();
+          setErrorMessage('Agence créée mais erreur utilisateur: ' + (errData.details?.[0]?.message || errData.error || ''));
         }
       } else {
-        const data = await agencyResponse.json();
-        setErrorMessage(data.error || 'Erreur lors de la création');
+        const detail = agencyData.details?.[0]?.message || agencyData.error || 'Erreur lors de la création';
+        setErrorMessage(detail);
       }
     } catch {
       setErrorMessage('Erreur de connexion');
@@ -290,11 +317,11 @@ export default function AgencesPage() {
                   <Label>Type d&apos;agence *</Label>
                   <Select value={agencyForm.agencyTypeId} onValueChange={(v) => setAgencyForm({ ...agencyForm, agencyTypeId: v })}>
                     <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
-                      <SelectValue />
+                      <SelectValue placeholder="Sélectionner un type" />
                     </SelectTrigger>
                     <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                      {Object.entries(AGENCY_TYPES).map(([key, def]) => (
-                        <SelectItem key={key} value={key}>{def.name}</SelectItem>
+                      {agencyTypes.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

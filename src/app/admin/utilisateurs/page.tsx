@@ -80,11 +80,15 @@ export default function UtilisateursPage() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [agencyTypeFilter, setAgencyTypeFilter] = useState('all');
 
+  const [formError, setFormError] = useState('');
+  const [formSuccess, setFormSuccess] = useState('');
+  const [creating, setCreating] = useState(false);
+
   const [userForm, setUserForm] = useState({
     email: '',
     name: '',
     password: '',
-    role: 'agent',
+    role: 'agency',
     agencyId: '',
     staffRole: '',
   });
@@ -118,6 +122,23 @@ export default function UtilisateursPage() {
   };
 
   const handleCreateUser = async () => {
+    if (!userForm.email || !userForm.password) {
+      setFormError("L'email et le mot de passe sont obligatoires");
+      return;
+    }
+    if (userForm.password.length < 6) {
+      setFormError('Le mot de passe doit contenir au moins 6 caractères');
+      return;
+    }
+    if ((userForm.role === 'agency' || userForm.role === 'staff') && !userForm.agencyId) {
+      setFormError("Veuillez sélectionner une agence");
+      return;
+    }
+
+    setCreating(true);
+    setFormError('');
+    setFormSuccess('');
+
     try {
       const response = await fetch('/api/admin/users', {
         method: 'POST',
@@ -125,13 +146,21 @@ export default function UtilisateursPage() {
         body: JSON.stringify(userForm),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
+        setFormSuccess(`Utilisateur ${data.user?.email} créé avec succès !`);
         fetchUsers();
-        setDialogOpen(false);
-        setUserForm({ email: '', name: '', password: '', role: 'agent', agencyId: '', staffRole: '' });
+        setUserForm({ email: '', name: '', password: '', role: 'agency', agencyId: '', staffRole: '' });
+        setTimeout(() => { setDialogOpen(false); setFormSuccess(''); }, 1500);
+      } else {
+        const detail = data.details?.[0]?.message || data.error || 'Erreur lors de la création';
+        setFormError(detail);
       }
     } catch (error) {
-      console.error('Error creating user:', error);
+      setFormError('Erreur de connexion au serveur');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -307,6 +336,8 @@ export default function UtilisateursPage() {
             <DialogTitle>Créer un utilisateur</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-4">
+            {formError && <p className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{formError}</p>}
+            {formSuccess && <p className="text-emerald-600 text-sm bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-xl">{formSuccess}</p>}
             <div className="space-y-2">
               <Label>Nom</Label>
               <Input
@@ -396,8 +427,9 @@ export default function UtilisateursPage() {
             <Button
               className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl"
               onClick={handleCreateUser}
+              disabled={creating}
             >
-              Créer l&apos;utilisateur
+              {creating ? 'Création...' : 'Créer l\'utilisateur'}
             </Button>
           </div>
         </DialogContent>
