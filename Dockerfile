@@ -6,11 +6,12 @@ RUN npm install -g bun
 
 WORKDIR /app
 
-# Clone the repository
-RUN git clone https://github.com/topmuch/qrtagssen.git .
+# Copy source code (Coolify provides the repo as build context)
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
-# Install dependencies
-RUN bun install
+# Copy the rest of the source
+COPY . .
 
 # Generate Prisma Client
 RUN npx prisma generate
@@ -32,11 +33,4 @@ ENV DATABASE_URL=file:/app/data/qrtags.db
 # Start command: run init-db script (handles prisma db push + manual table creation + admin creation),
 # then start the Next.js server.
 # The app also has /api/auth/init for runtime self-healing on every login page load.
-CMD sh -c "\
-  mkdir -p /app/data && \
-  export DATABASE_URL=file:/app/data/qrtags.db && \
-  echo '[startup] Initializing database...' && \
-  node scripts/init-db.cjs && \
-  echo '[startup] Starting QRTags server...' && \
-  exec node .next/standalone/server.js \
-"
+CMD ["sh", "-c", "mkdir -p /app/data && export DATABASE_URL=file:/app/data/qrtags.db && echo '[startup] Initializing database...' && node scripts/init-db.cjs && echo '[startup] Starting QRTags server...' && exec node .next/standalone/server.js"]

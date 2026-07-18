@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+skills
+tool-results
+agent-ctx
+repo-backup
+upload
+screenshot-*.png
+*.db
+db/*.db
+prisma/db.sqlite
+.env
+.env.*
+!.env.example
