@@ -1,0 +1,106 @@
+# ═══════════════════════════════════════════════════════════════
+# QRTags - Docker Compose for Coolify Deployment
+# ═══════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker compose up -d          # Start all services
+#   docker compose logs -f        # View logs
+#   docker compose down           # Stop all services
+#
+# Coolify Setup:
+#   1. Create a new resource → Docker Compose
+#   2. Paste this file or link your repo
+#   3. Configure environment variables in Coolify UI
+#   4. Deploy!
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ── Main QRTags Application ─────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qrtags-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=${DATABASE_URL:-file:/app/data/qrtags.db}
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-qrtags-encryption-key-2024}
+      # Optional integrations
+      - WAKIT_API_KEY=${WAKIT_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - GROQ_AI_ENABLED=${GROQ_AI_ENABLED:-false}
+    volumes:
+      - qrtags-data:/app/data
+      - qrtags-uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
+    networks:
+      - qrtags-network
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=qrtags-app"
+
+  # ── WebSocket Service (Real-time tracking) ──────────────────
+  websocket:
+    build:
+      context: ./mini-services/tracking-ws
+      dockerfile: Dockerfile
+    container_name: qrtags-websocket
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+    networks:
+      - qrtags-network
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=qrtags-websocket"
+
+# ── Volumes ──────────────────────────────────────────────────
+volumes:
+  qrtags-data:
+    driver: local
+    labels:
+      - "coolify.managed=true"
+  qrtags-uploads:
+    driver: local
+    labels:
+      - "coolify.managed=true"
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  qrtags-network:
+    driver: bridge
+    labels:
+      - "coolify.managed=true"

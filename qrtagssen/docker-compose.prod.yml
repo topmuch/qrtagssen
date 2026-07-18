@@ -1,0 +1,108 @@
+# ═══════════════════════════════════════════════════════════════
+# QRTags - Production Docker Compose (with PostgreSQL)
+# Use this for production deployments on Coolify
+# ═══════════════════════════════════════════════════════════════
+#
+# Usage:
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ── PostgreSQL Database ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: qrtags-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qrtags}
+      POSTGRES_USER: ${POSTGRES_USER:-qrtags}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - qrtags-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qrtags}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qrtags-network
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=qrtags-postgres"
+
+  # ── Main QRTags Application ─────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: qrtags-app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qrtags}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-qrtags}?schema=public
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
+      - NEXTAUTH_URL=${NEXTAUTH_URL:-http://localhost:3000}
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:3000}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-qrtags-encryption-key-2024}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - qrtags-uploads:/app/public/uploads
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    networks:
+      - qrtags-network
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=qrtags-app"
+
+  # ── WebSocket Service (Real-time tracking) ──────────────────
+  websocket:
+    build:
+      context: ./mini-services/tracking-ws
+      dockerfile: Dockerfile
+    container_name: qrtags-websocket
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    networks:
+      - qrtags-network
+    labels:
+      - "coolify.managed=true"
+      - "coolify.service=qrtags-websocket"
+
+# ── Volumes ──────────────────────────────────────────────────
+volumes:
+  qrtags-pgdata:
+    driver: local
+    labels:
+      - "coolify.managed=true"
+  qrtags-uploads:
+    driver: local
+    labels:
+      - "coolify.managed=true"
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  qrtags-network:
+    driver: bridge
+    labels:
+      - "coolify.managed=true"
