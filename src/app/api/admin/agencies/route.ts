@@ -129,9 +129,12 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Create agency error:', error);
     
-    if (error instanceof z.ZodError) {
+    // Zod v4 compatible error handling
+    const zodError = error as Record<string, unknown>;
+    if (error instanceof z.ZodError || (zodError && typeof zodError === 'object' && ('issues' in zodError || 'errors' in zodError))) {
+      const details = (zodError.issues || zodError.errors || []) as Array<{ message: string }>;
       return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+        { error: 'Validation error', details },
         { status: 400 }
       );
     }
@@ -196,6 +199,11 @@ export async function PUT(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// PATCH - Update agency (alias for PUT, used by edit dialog)
+export async function PATCH(request: NextRequest) {
+  return PUT(request);
 }
 
 // DELETE - Delete agency

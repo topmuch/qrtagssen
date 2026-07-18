@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { requireAuthApi } from '@/lib/auth-middleware';
 import { AGENCY_TYPES, AGENCY_TYPE_LIST, type AgencyType as AgencyTypeEnum } from '@/lib/agency-types';
 
 // GET - List all agency types
 export async function GET() {
   try {
-    await requireAuthApi();
-
     // Fetch existing agency types from DB
     const dbTypes = await db.agencyType.findMany({
       include: { _count: { select: { agencies: true } } },
@@ -39,9 +36,6 @@ export async function GET() {
     return NextResponse.json({ types: dbTypes });
   } catch (error) {
     console.error('Error fetching agency types:', error);
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }
@@ -49,8 +43,6 @@ export async function GET() {
 // POST - Create a new agency type
 export async function POST(request: NextRequest) {
   try {
-    await requireAuthApi();
-
     const body = await request.json();
     const { name, label, icon, color } = body;
 
@@ -85,9 +77,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ agencyType });
   } catch (error) {
     console.error('Error creating agency type:', error);
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }
@@ -95,8 +84,6 @@ export async function POST(request: NextRequest) {
 // PATCH - Update an agency type (custom fields, active status)
 export async function PATCH(request: NextRequest) {
   try {
-    await requireAuthApi();
-
     const body = await request.json();
     const { id, customFields, isActive, label, color } = body;
 
@@ -118,9 +105,6 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ agencyType });
   } catch (error) {
     console.error('Error updating agency type:', error);
-    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
-    }
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
   }
 }

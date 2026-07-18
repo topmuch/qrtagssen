@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 
-// Validation schema
+// Validation schema (Zod v4 compatible)
 const userSchema = z.object({
   email: z.string().email(),
   name: z.string().optional(),
@@ -19,11 +19,29 @@ async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
+// Helper: extract Zod validation details (works with both v3 and v4)
+function getZodDetails(error: unknown): Array<{ message: string; path: (string | number)[] }> {
+  const e = error as Record<string, unknown>;
+  // Zod v4 uses .issues, Zod v3 uses .errors
+  return (e.issues || e.errors || []) as Array<{ message: string; path: (string | number)[] }>;
+}
+
+// Helper: check if error is a ZodError (works with both v3 and v4)
+function isZodError(error: unknown): boolean {
+  if (error instanceof z.ZodError) return true;
+  const e = error as Record<string, unknown>;
+  return !!(e && typeof e === 'object' && ('issues' in e || 'errors' in e));
+}
+
 // GET - List all users
 export async function GET() {
   try {
     const users = await db.user.findMany({
-      include: { agency: true },
+      include: {
+        agency: {
+          select: { id: true, name: true, agencyType: { select: { name: true } } }
+        }
+      },
       orderBy: { createdAt: 'desc' }
     });
 
@@ -45,7 +63,10 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    console.log('[users/POST] Received body:', JSON.stringify(body));
+
     const validatedData = userSchema.parse(body);
+    console.log('[users/POST] Validated data:', { email: validatedData.email, role: validatedData.role, agencyId: validatedData.agencyId });
 
     // Check if email already exists
     const existing = await db.user.findUnique({
@@ -60,36 +81,56 @@ export async function POST(request: NextRequest) {
     }
 
     const hashedPassword = await hashPassword(validatedData.password);
-    const user = await db.user.create({
-      data: {
-        email: validatedData.email,
-        name: validatedData.name || null,
-        password: hashedPassword,
-        role: validatedData.role,
-        agencyId: validatedData.agencyId || null,
-        staffRole: validatedData.staffRole || null,
-        permissions: JSON.stringify(validatedData.permissions || []),
-        isActive: true,
-      }
-    });
+    console.log('[users/POST] Password hashed successfully');
+
+    const userData: Record<string, unknown> = {
+      email: validatedData.email,
+      name: validatedData.name || null,
+      password: hashedPassword,
+      role: validatedData.role,
+      agencyId: validatedData.agencyId && validatedData.agencyId.length > 0 ? validatedData.agencyId : null,
+      staffRole: validatedData.staffRole && validatedData.staffRole.length > 0 ? validatedData.staffRole : null,
+      permissions: JSON.stringify(validatedData.permissions || []),
+      isActive: true,
+    };
+
+    console.log('[users/POST] Creating user with data:', { ...userData, password: '[REDACTED]' });
+
+    const user = await db.user.create({ data: userData as any });
 
     // Remove password from response
     const { password, ...safeUser } = user;
 
+    console.log('[users/POST] User created successfully:', safeUser.id);
     return NextResponse.json({ user: safeUser });
 
   } catch (error) {
-    console.error('Create user error:', error);
-    
-    if (error instanceof z.ZodError) {
+    console.error('[users/POST] Create user error:', error);
+
+    // Handle Zod validation errors (compatible with both v3 and v4)
+    if (isZodError(error)) {
+      const details = getZodDetails(error);
       return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+        { error: 'Validation error', details },
+        { status: 400 }
+      );
+    }
+
+    // Handle Prisma unique constraint error
+    const prismaError = error as { code?: string; message?: string };
+    if (prismaError?.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'Cet email est déjà utilisé' },
         { status: 400 }
       );
     }
 
     return NextResponse.json(
-      { error: 'Internal server error', detail: error instanceof Error ? error.message : String(error) },
+      {
+        error: 'Internal server error',
+        detail: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      },
       { status: 500 }
     );
   }
@@ -102,7 +143,7 @@ export async function PUT(request: NextRequest) {
     const { id, password, ...data } = body;
 
     const updateData: Record<string, unknown> = { ...data };
-    
+
     if (password) {
       updateData.password = await hashPassword(password);
     }

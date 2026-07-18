@@ -81,8 +81,10 @@ export async function POST(request: NextRequest) {
     }
 
     if (error instanceof z.ZodError) {
+      const zodErr = error as Record<string, unknown>;
+      const details = (zodErr.issues || zodErr.errors || []) as Array<{ message: string }>;
       return NextResponse.json(
-        { error: 'Validation error', details: error.errors },
+        { error: 'Validation error', details },
         { status: 400 }
       );
     }
