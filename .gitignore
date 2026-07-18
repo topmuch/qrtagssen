@@ -18,9 +18,10 @@ build/
 .env.test.local
 .env.production.local
 
-# Database
+# Database files (generated at runtime)
 *.db
-db/custom.db
+db/*.db
+prisma/db.sqlite
 
 # Debug
 npm-debug.log*
@@ -38,13 +39,18 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
-# Skills (dev-only)
+# Dev-only (not needed in production)
 skills/
 tool-results/
+agent-ctx/
+repo-backup/
+upload/
 
 # Misc
-repo-backup/
 scripts/seed-db.js
 *.pyc
 __pycache__/
 .turbo/
+
+# Dev screenshots
+screenshot-*.png
