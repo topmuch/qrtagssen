@@ -46,6 +46,52 @@ export async function GET() {
   }
 }
 
+// POST - Create a new agency type
+export async function POST(request: NextRequest) {
+  try {
+    await requireAuthApi();
+
+    const body = await request.json();
+    const { name, label, icon, color } = body;
+
+    if (!name || !label) {
+      return NextResponse.json({ error: 'Le nom et le label sont requis' }, { status: 400 });
+    }
+
+    // Check if name already exists
+    const existing = await db.agencyType.findUnique({ where: { name } });
+    if (existing) {
+      return NextResponse.json({ error: 'Ce nom de type existe déjà' }, { status: 400 });
+    }
+
+    // Get max sortOrder
+    const maxSort = await db.agencyType.findFirst({
+      orderBy: { sortOrder: 'desc' },
+      select: { sortOrder: true },
+    });
+
+    const agencyType = await db.agencyType.create({
+      data: {
+        name,
+        label,
+        icon: icon || 'Layers',
+        color: color || '#10B981',
+        customFields: JSON.stringify([]),
+        isActive: true,
+        sortOrder: (maxSort?.sortOrder ?? -1) + 1,
+      },
+    });
+
+    return NextResponse.json({ agencyType });
+  } catch (error) {
+    console.error('Error creating agency type:', error);
+    if (error instanceof Error && error.message === 'UNAUTHORIZED') {
+      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 });
+    }
+    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 });
+  }
+}
+
 // PATCH - Update an agency type (custom fields, active status)
 export async function PATCH(request: NextRequest) {
   try {

@@ -13,6 +13,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Hotel,
   Bus,
   GraduationCap,
@@ -26,6 +33,8 @@ import {
   ToggleRight,
   RefreshCw,
   Layers,
+  Plus,
+  Loader2,
 } from "lucide-react";
 import { AGENCY_TYPES, AGENCY_TYPE_LIST, type AgencyType as AgencyTypeEnum, type AgencyFieldDef } from '@/lib/agency-types';
 
@@ -40,6 +49,18 @@ const iconMap: Record<string, React.ReactNode> = {
   Building2: <Building2 className="w-8 h-8" />,
   PartyPopper: <PartyPopper className="w-8 h-8" />,
 };
+
+const ICON_OPTIONS = [
+  { value: 'Hotel', label: 'Hôtel' },
+  { value: 'Bus', label: 'Bus' },
+  { value: 'GraduationCap', label: 'École' },
+  { value: 'Stethoscope', label: 'Clinique' },
+  { value: 'Car', label: 'Voiture' },
+  { value: 'Luggage', label: 'Bagage' },
+  { value: 'Building2', label: 'Bâtiment' },
+  { value: 'PartyPopper', label: 'Événement' },
+  { value: 'Layers', label: 'Générique' },
+];
 
 interface AgencyTypeData {
   id: string;
@@ -60,6 +81,12 @@ export default function TypesAgencesPage() {
   const [editFields, setEditFields] = useState<AgencyFieldDef[]>([]);
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
+
+  // Create dialog state
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: '', label: '', icon: 'Layers', color: '#10B981' });
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   useEffect(() => {
     fetchTypes();
@@ -131,6 +158,36 @@ export default function TypesAgencesPage() {
     }
   };
 
+  const handleCreateType = async () => {
+    if (!createForm.name || !createForm.label) {
+      setCreateError('Le nom technique et le label sont obligatoires');
+      return;
+    }
+    setCreating(true);
+    setCreateError('');
+    try {
+      const res = await fetch('/api/admin/agency-types', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(createForm),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSuccessMessage('Type d\'agence créé avec succès');
+        setCreateDialogOpen(false);
+        setCreateForm({ name: '', label: '', icon: 'Layers', color: '#10B981' });
+        fetchTypes();
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        setCreateError(data.error || 'Erreur lors de la création');
+      }
+    } catch {
+      setCreateError('Erreur de connexion au serveur');
+    } finally {
+      setCreating(false);
+    }
+  };
+
   const addField = () => {
     setEditFields([...editFields, { name: '', label: '', type: 'text', required: false }]);
   };
@@ -145,8 +202,8 @@ export default function TypesAgencesPage() {
     setEditFields(updated);
   };
 
-  // Merge static definitions with DB data
-  const displayTypes = AGENCY_TYPE_LIST.map(typeKey => {
+  // Merge static definitions with DB data for built-in types
+  const staticDisplayTypes = AGENCY_TYPE_LIST.map(typeKey => {
     const dbType = types.find(t => t.name === typeKey);
     const staticDef = AGENCY_TYPES[typeKey];
     return {
@@ -158,8 +215,30 @@ export default function TypesAgencesPage() {
       isActive: dbType?.isActive ?? true,
       agencyCount: dbType?._count?.agencies ?? 0,
       dbId: dbType?.id,
+      isCustom: false,
     };
   });
+
+  // Custom types (not in static AGENCY_TYPE_LIST)
+  const customDisplayTypes = types
+    .filter(t => !AGENCY_TYPE_LIST.includes(t.name as AgencyTypeEnum))
+    .map(t => {
+      let fields: AgencyFieldDef[] = [];
+      try { fields = t.customFields ? JSON.parse(t.customFields) : []; } catch { /* empty */ }
+      return {
+        key: t.name,
+        name: t.label,
+        icon: t.icon,
+        color: t.color,
+        fields,
+        isActive: t.isActive,
+        agencyCount: t._count?.agencies ?? 0,
+        dbId: t.id,
+        isCustom: true,
+      };
+    });
+
+  const allDisplayTypes = [...staticDisplayTypes, ...customDisplayTypes];
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -167,16 +246,74 @@ export default function TypesAgencesPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Types d&apos;Agences</h1>
-          <p className="text-slate-500 dark:text-slate-400 mt-1">Gérez les 8 métiers supportés par QRTags</p>
+          <p className="text-slate-500 dark:text-slate-400 mt-1">Gérez les métiers supportés par QRTags</p>
         </div>
-        <Button
-          onClick={fetchTypes}
-          variant="outline"
-          className="border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl"
-        >
-          <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-          Actualiser
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            onClick={fetchTypes}
+            variant="outline"
+            className="border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl"
+          >
+            <RefreshCw className={'w-4 h-4 mr-2 ' + (loading ? 'animate-spin' : '')} />
+            Actualiser
+          </Button>
+          <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+            <Button className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl" onClick={() => { setCreateError(''); setCreateDialogOpen(true); }}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nouveau type
+            </Button>
+            <DialogContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 max-w-md">
+              <DialogHeader>
+                <DialogTitle className="text-slate-800 dark:text-white">Créer un type d&apos;agence</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                {createError && <p className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{createError}</p>}
+                <div className="space-y-2">
+                  <Label>Nom technique *</Label>
+                  <Input
+                    placeholder="ex: restaurant"
+                    value={createForm.name}
+                    onChange={(e) => setCreateForm({ ...createForm, name: e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '_') })}
+                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                  <p className="text-xs text-slate-400">Identifiant unique (lettres minuscules, chiffres, _)</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Label d&apos;affichage *</Label>
+                  <Input
+                    placeholder="ex: Restaurant"
+                    value={createForm.label}
+                    onChange={(e) => setCreateForm({ ...createForm, label: e.target.value })}
+                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Icône</Label>
+                  <Select value={createForm.icon} onValueChange={(v) => setCreateForm({ ...createForm, icon: v })}>
+                    <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                      {ICON_OPTIONS.map(opt => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Couleur</Label>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="w-10 h-10 rounded cursor-pointer" />
+                    <Input value={createForm.color} onChange={(e) => setCreateForm({ ...createForm, color: e.target.value })} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl" />
+                  </div>
+                </div>
+                <Button onClick={handleCreateType} disabled={creating} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl">
+                  {creating ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Création...</> : 'Créer le type'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Success Message */}
@@ -195,29 +332,34 @@ export default function TypesAgencesPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {displayTypes.map((type) => (
+          {allDisplayTypes.map((type) => (
             <Card
               key={type.key}
-              className={`bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-2xl hover:shadow-lg transition-all duration-300 ${!type.isActive ? 'opacity-50' : ''}`}
-              style={{ borderTop: `3px solid ${type.color}` }}
+              className={'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-2xl hover:shadow-lg transition-all duration-300 ' + (!type.isActive ? 'opacity-50' : '')}
+              style={{ borderTop: '3px solid ' + type.color }}
             >
               <CardContent className="p-6">
                 {/* Icon & Name */}
                 <div className="flex items-start justify-between mb-4">
                   <div
                     className="w-14 h-14 rounded-xl flex items-center justify-center"
-                    style={{ backgroundColor: `${type.color}15`, color: type.color }}
+                    style={{ backgroundColor: type.color + '15', color: type.color }}
                   >
                     {iconMap[type.icon] || <Layers className="w-8 h-8" />}
                   </div>
-                  <Badge
-                    className={type.isActive
-                      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
-                      : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
-                    }
-                  >
-                    {type.isActive ? 'Actif' : 'Inactif'}
-                  </Badge>
+                  <div className="flex items-center gap-1">
+                    {type.isCustom && (
+                      <Badge className="bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs">Personnalisé</Badge>
+                    )}
+                    <Badge
+                      className={type.isActive
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'
+                      }
+                    >
+                      {type.isActive ? 'Actif' : 'Inactif'}
+                    </Badge>
+                  </div>
                 </div>
 
                 <h3 className="font-semibold text-slate-800 dark:text-white mb-1">{type.name}</h3>

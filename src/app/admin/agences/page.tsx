@@ -154,12 +154,20 @@ export default function AgencesPage() {
   };
 
   const handleCreateAgency = async () => {
+    if (!agencyForm.name) {
+      setErrorMessage('Le nom est obligatoire');
+      return;
+    }
     if (!agencyForm.email) {
       setErrorMessage("L'email est obligatoire");
       return;
     }
-    if (!agencyForm.password || agencyForm.password.length < 8) {
-      setErrorMessage('Le mot de passe doit contenir au moins 8 caractères');
+    if (!agencyForm.agencyTypeId) {
+      setErrorMessage("Veuillez sélectionner un type d'agence");
+      return;
+    }
+    if (!agencyForm.password || agencyForm.password.length < 6) {
+      setErrorMessage('Le mot de passe doit contenir au moins 6 caractères');
       return;
     }
     if (agencyForm.password !== agencyForm.confirmPassword) {
@@ -304,7 +312,7 @@ export default function AgencesPage() {
                 <DialogTitle className="text-slate-800 dark:text-white">Créer une agence</DialogTitle>
               </DialogHeader>
               <div className="space-y-4 pt-4">
-                {errorMessage && <p className="text-red-500 text-sm">{errorMessage}</p>}
+                {errorMessage && <p className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{errorMessage}</p>}
                 <div className="space-y-2">
                   <Label>Nom *</Label>
                   <Input value={agencyForm.name} onChange={(e) => setAgencyForm({ ...agencyForm, name: e.target.value })} className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl" />

@@ -33,7 +33,7 @@ import {
   Users,
   Search,
   RefreshCw,
-  Filter,
+  Loader2,
 } from "lucide-react";
 
 // Types
@@ -149,7 +149,7 @@ export default function UtilisateursPage() {
       const data = await response.json();
 
       if (response.ok) {
-        setFormSuccess(`Utilisateur ${data.user?.email} créé avec succès !`);
+        setFormSuccess('Utilisateur ' + (data.user?.email || '') + ' créé avec succès !');
         fetchUsers();
         setUserForm({ email: '', name: '', password: '', role: 'agency', agencyId: '', staffRole: '' });
         setTimeout(() => { setDialogOpen(false); setFormSuccess(''); }, 1500);
@@ -168,7 +168,7 @@ export default function UtilisateursPage() {
     if (!confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ?')) return;
 
     try {
-      const response = await fetch(`/api/admin/users?id=${id}`, {
+      const response = await fetch('/api/admin/users?id=' + id, {
         method: 'DELETE',
       });
 
@@ -198,7 +198,7 @@ export default function UtilisateursPage() {
   const filteredUsers = users.filter(user => {
     const matchesSearch = !search || user.name?.toLowerCase().includes(search.toLowerCase()) || user.email.toLowerCase().includes(search.toLowerCase());
     const matchesRole = roleFilter === 'all' || user.role === roleFilter;
-    const matchesAgencyType = agencyTypeFilter === 'all' || (user as User & { agency?: Agency | null }).agency?.agencyType?.name === agencyTypeFilter;
+    const matchesAgencyType = agencyTypeFilter === 'all' || (user.agency as any)?.agencyType?.name === agencyTypeFilter;
     return matchesSearch && matchesRole && matchesAgencyType;
   });
 
@@ -210,10 +210,124 @@ export default function UtilisateursPage() {
           <h1 className="text-2xl font-bold text-slate-800 dark:text-white">Utilisateurs</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Gérez les utilisateurs et leurs accès</p>
         </div>
-        <Button className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl" onClick={() => setDialogOpen(true)}>
-          <Plus className="w-4 h-4 mr-2" />
-          Nouvel utilisateur
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            onClick={fetchUsers}
+            variant="outline"
+            className="border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 rounded-xl"
+          >
+            <RefreshCw className={'w-4 h-4 mr-2 ' + (loading ? 'animate-spin' : '')} />
+            Actualiser
+          </Button>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <Button className="bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl" onClick={() => setDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              Nouvel utilisateur
+            </Button>
+            <DialogContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white">
+              <DialogHeader>
+                <DialogTitle>Créer un utilisateur</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 pt-4">
+                {formError && <p className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{formError}</p>}
+                {formSuccess && <p className="text-emerald-600 text-sm bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-xl">{formSuccess}</p>}
+                <div className="space-y-2">
+                  <Label>Nom</Label>
+                  <Input
+                    placeholder="Jean Dupont"
+                    value={userForm.name}
+                    onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email *</Label>
+                  <Input
+                    type="email"
+                    placeholder="email@exemple.com"
+                    value={userForm.email}
+                    onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Mot de passe *</Label>
+                  <Input
+                    type="password"
+                    placeholder="Mot de passe"
+                    value={userForm.password}
+                    onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
+                    className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Rôle</Label>
+                  <Select
+                    value={userForm.role}
+                    onValueChange={(v) => setUserForm({ ...userForm, role: v, staffRole: v === 'staff' ? 'receptionniste' : '' })}
+                  >
+                    <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                      <SelectItem value="agent">Agent</SelectItem>
+                      <SelectItem value="staff">Personnel</SelectItem>
+                      <SelectItem value="agency">Agence</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="superadmin">SuperAdmin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {userForm.role === 'staff' && (
+                  <div className="space-y-2">
+                    <Label>Rôle du personnel</Label>
+                    <Select
+                      value={userForm.staffRole}
+                      onValueChange={(v) => setUserForm({ ...userForm, staffRole: v })}
+                    >
+                      <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
+                        <SelectValue placeholder="Sélectionner un rôle" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                        <SelectItem value="receptionniste">Réceptionniste</SelectItem>
+                        <SelectItem value="housekeeping">Housekeeping</SelectItem>
+                        <SelectItem value="securite">Sécurité</SelectItem>
+                        <SelectItem value="agent">Agent</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {(userForm.role === 'agency' || userForm.role === 'staff') && (
+                  <div className="space-y-2">
+                    <Label>Agence</Label>
+                    <Select
+                      value={userForm.agencyId}
+                      onValueChange={(v) => setUserForm({ ...userForm, agencyId: v })}
+                    >
+                      <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
+                        <SelectValue placeholder="Sélectionner une agence" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
+                        {agencies.map((agency) => (
+                          <SelectItem key={agency.id} value={agency.id}>
+                            {agency.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <Button
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl"
+                  onClick={handleCreateUser}
+                  disabled={creating}
+                >
+                  {creating ? 'Création...' : 'Créer l\'utilisateur'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Filters */}
@@ -328,112 +442,6 @@ export default function UtilisateursPage() {
           </div>
         </Card>
       )}
-
-      {/* Create User Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-800 dark:text-white">
-          <DialogHeader>
-            <DialogTitle>Créer un utilisateur</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            {formError && <p className="text-red-500 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded-xl">{formError}</p>}
-            {formSuccess && <p className="text-emerald-600 text-sm bg-emerald-50 dark:bg-emerald-900/20 p-3 rounded-xl">{formSuccess}</p>}
-            <div className="space-y-2">
-              <Label>Nom</Label>
-              <Input
-                placeholder="Jean Dupont"
-                value={userForm.name}
-                onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
-                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input
-                type="email"
-                placeholder="email@exemple.com"
-                value={userForm.email}
-                onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
-                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Mot de passe *</Label>
-              <Input
-                type="password"
-                placeholder="Mot de passe"
-                value={userForm.password}
-                onChange={(e) => setUserForm({ ...userForm, password: e.target.value })}
-                className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Rôle</Label>
-              <Select
-                value={userForm.role}
-                onValueChange={(v) => setUserForm({ ...userForm, role: v, staffRole: v === 'staff' ? 'receptionniste' : '' })}
-              >
-                <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                  <SelectItem value="agent">Agent</SelectItem>
-                  <SelectItem value="staff">Personnel</SelectItem>
-                  <SelectItem value="agency">Agence</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="superadmin">SuperAdmin</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {userForm.role === 'staff' && (
-              <div className="space-y-2">
-                <Label>Rôle du personnel</Label>
-                <Select
-                  value={userForm.staffRole}
-                  onValueChange={(v) => setUserForm({ ...userForm, staffRole: v })}
-                >
-                  <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
-                    <SelectValue placeholder="Sélectionner un rôle" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                    <SelectItem value="receptionniste">Réceptionniste</SelectItem>
-                    <SelectItem value="housekeeping">Housekeeping</SelectItem>
-                    <SelectItem value="securite">Sécurité</SelectItem>
-                    <SelectItem value="agent">Agent</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            {(userForm.role === 'agency' || userForm.role === 'staff') && (
-              <div className="space-y-2">
-                <Label>Agence</Label>
-                <Select
-                  value={userForm.agencyId}
-                  onValueChange={(v) => setUserForm({ ...userForm, agencyId: v })}
-                >
-                  <SelectTrigger className="bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl">
-                    <SelectValue placeholder="Sélectionner une agence" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800">
-                    {agencies.map((agency) => (
-                      <SelectItem key={agency.id} value={agency.id}>
-                        {agency.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-            <Button
-              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl"
-              onClick={handleCreateUser}
-              disabled={creating}
-            >
-              {creating ? 'Création...' : 'Créer l\'utilisateur'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
